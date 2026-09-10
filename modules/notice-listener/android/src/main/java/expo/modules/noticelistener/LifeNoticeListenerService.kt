@@ -19,6 +19,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val RELATIVE = Regex("今天|今晚|明天|明晚|後天|大後天|這週|本週|下週|下星期|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]")
     private val TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*(?:[01]?\\d|2[0-3])(?:[:：點時]\\s*[0-5]?\\d)?|(?:[01]?\\d|2[0-3])[:：][0-5]\\d)")
     private val HIGH_INTENT = Regex("截止|最晚|到期|繳交|繳費|繳款|付款|取件|領取|取貨|集合|報名|預約|會議|開會|面試|上課|考試|比賽|登機|出發|看診|門診|回診|訂位|入住|退房")
+    private val TASK_INTENT = Regex("填寫|回覆|提交|完成|準備|攜帶|帶上|聯絡|寄送|繳交|繳費|付款|領取|取件|報名|預約|購買|買|訂購|確認")
     private val EVENT = Regex("活動|課程|講座|聚餐|會議|比賽|考試|面試|預約|看診|回診|集合|出發|登機|訂位")
     private val ACTION = Regex("請|需要|需|須|務必|記得|別忘|回覆|填寫|完成|提交|繳|帶|攜帶|準備|確認|參加|出席|領取|取件|付款|報名|預約")
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
@@ -28,21 +29,25 @@ class LifeNoticeListenerService : NotificationListenerService() {
 
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
     if (sbn == null || sbn.packageName == packageName) return
+    // Privacy boundary: if the user did not explicitly select this app, return before
+    // reading Notification.extras. Unselected notification content is never extracted,
+    // stored, analyzed, or forwarded to AI.
+    if (!AppMonitorStore.isAllowed(applicationContext, sbn.packageName)) return
+
     val notification = sbn.notification ?: return
     val (title, body) = extract(notification)
     val text = listOf(title, body).filter { it.isNotBlank() }.distinct().joinToString("\n").trim()
     if (text.length < 3 || IGNORE.containsMatchIn(text)) return
 
-    // Cheap local gate before anything is stored or sent to AI. A date, a time, or the
-    // word "請" alone is never enough: system status messages and ordinary chats often
-    // contain those. We require an actual schedule/deadline/action combination.
     val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
     val hasTime = TIME.containsMatchIn(text)
     val hasHighIntent = HIGH_INTENT.containsMatchIn(text)
+    val hasTaskIntent = TASK_INTENT.containsMatchIn(text)
     val hasEvent = EVENT.containsMatchIn(text)
     val hasAction = ACTION.containsMatchIn(text)
     val hasChange = CHANGE.containsMatchIn(text)
     val candidate = hasChange ||
+      hasTaskIntent ||
       (hasHighIntent && (hasDate || hasTime || hasAction)) ||
       (hasDate && hasAction) ||
       (hasDate && hasTime && hasEvent)
@@ -62,12 +67,12 @@ class LifeNoticeListenerService : NotificationListenerService() {
   }
 
   private fun shouldNotifyNow(text: String, score: Int): Boolean {
-    // The listener is intentionally quiet. Capturing a candidate is not the same thing
-    // as interrupting the user with another notification.
     val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
     val hasStrong = HIGH_INTENT.containsMatchIn(text)
     val urgentChange = CHANGE.containsMatchIn(text)
     val explicitImportant = IMPORTANT.containsMatchIn(text)
+    // Deadline-free todos are captured quietly. They should appear in the in-app todo
+    // list, but do not interrupt the user with a second notification.
     return (urgentChange && score >= 7) ||
       (explicitImportant && (hasDate || hasStrong) && score >= 9) ||
       (hasDate && hasStrong && score >= 10)
@@ -95,7 +100,8 @@ class LifeNoticeListenerService : NotificationListenerService() {
     if (TIME.containsMatchIn(text)) { score += 2; reasons += "時間" }
     if (HIGH_INTENT.containsMatchIn(text)) { score += 5; reasons += "行程/期限" }
     else if (EVENT.containsMatchIn(text)) { score += 3; reasons += "活動語意" }
-    if (ACTION.containsMatchIn(text)) { score += 2; reasons += "待辦語意" }
+    if (TASK_INTENT.containsMatchIn(text)) { score += 6; reasons += "待辦" }
+    else if (ACTION.containsMatchIn(text)) { score += 2; reasons += "待辦語意" }
     if (IMPORTANT.containsMatchIn(text)) { score += 4; reasons += "重要訊息" }
     return score to reasons.distinct().joinToString("、")
   }
