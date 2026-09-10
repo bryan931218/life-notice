@@ -1,8 +1,11 @@
 package expo.modules.noticelistener
 
+import android.app.StatusBarManager
 import android.content.ComponentName
-import android.content.Intent
 import android.content.ContentValues
+import android.content.Intent
+import android.graphics.drawable.Icon
+import android.os.Build
 import android.provider.CalendarContract
 import android.provider.Settings
 import java.util.TimeZone
@@ -16,7 +19,6 @@ class NoticeListenerModule : Module() {
     val expected = ComponentName(context, LifeNoticeListenerService::class.java)
     return flat.split(":").mapNotNull(ComponentName::unflattenFromString).any { it == expected }
   }
-
 
   private fun addCalendarEvent(title: String, startAt: Long, endAt: Long, allDay: Boolean, description: String, location: String, syncKey: String): String {
     val context = appContext.reactContext ?: throw IllegalStateException("App 尚未準備好")
@@ -53,11 +55,19 @@ class NoticeListenerModule : Module() {
 
     Function("openSettings") {
       val context = appContext.reactContext ?: return@Function null
-      val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      }
+      val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
       context.startActivity(intent)
       null
+    }
+
+    Function("requestQuickTile") {
+      val context = appContext.reactContext ?: return@Function false
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@Function false
+      val manager = context.getSystemService(StatusBarManager::class.java) ?: return@Function false
+      val component = ComponentName(context, LifeNoticeCaptureTileService::class.java)
+      val icon = Icon.createWithResource(context, context.applicationInfo.icon)
+      manager.requestAddTileService(component, "擷取行程", icon, context.mainExecutor) { }
+      true
     }
 
     Function("getDetected") {
