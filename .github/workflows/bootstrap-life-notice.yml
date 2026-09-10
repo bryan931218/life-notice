@@ -51,16 +51,6 @@ jobs:
           npm install
           npm run verify
 
-      - name: Commit clean project to main
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Import Life Notice app and release pipeline"
-          git push --force origin HEAD:main
-
       - name: Generate Android native project
         env:
           CI: 1
@@ -88,10 +78,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TARGET="$(git rev-parse HEAD)"
+          TARGET="${GITHUB_SHA}"
           TAG="preview-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" life-notice-preview.apk \
             --target "$TARGET" \
             --title "生活通知管家 Android 測試版 #${GITHUB_RUN_NUMBER}" \
             --notes "可直接安裝於 Android 手機的內部測試版。此 APK 使用測試簽章，不是 Google Play 正式上架包。" \
             --latest
+
+      - name: Commit clean project to main
+        if: ${{ success() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import Life Notice app and release pipeline"
+          git push --force origin HEAD:main
