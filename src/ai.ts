@@ -47,11 +47,11 @@ const tools=[
   },
   {
     type:'function',name:'create_task',strict:true,
-    description:'通知描述要完成、繳交、繳費、領取、回覆、準備等待辦/期限，而不是一個需要佔據行事曆時間區塊的活動時使用。',
+    description:'通知描述使用者要完成、填寫、回覆、準備、購買、繳交、繳費、領取等待辦時使用。沒有期限也完全可以建立待辦：due_at 填 null，且不要為了缺少日期改用 ask_user。',
     parameters:{type:'object',additionalProperties:false,properties:{
       title:{type:'string',maxLength:100},
-      due_at:{type:['string','null'],description:'ISO 8601 截止時間；內容沒有可靠時間就 null，不要猜。'},
-      reminder_minutes:{type:['integer','null'],minimum:0,maximum:10080},
+      due_at:{type:['string','null'],description:'ISO 8601 截止時間；內容沒有明確期限就必須填 null，不要猜。null 代表無期限 Todo。'},
+      reminder_minutes:{type:['integer','null'],minimum:0,maximum:10080,description:'無期限 Todo 必須填 null。'},
       category:{type:'string',enum:categories},
       checklist:{type:'array',items:{type:'string',maxLength:160},maxItems:8},
       importance:importanceProperty,
@@ -67,14 +67,14 @@ const tools=[
   },
   {
     type:'function',name:'ask_user',strict:true,
-    description:'訊息很可能重要，但關鍵日期、時間、對象或意圖有歧義，直接建立行程有明顯風險時使用。',
+    description:'只有在「到底要做什麼／是不是行程」本身有歧義，或訊息明確提到日期時間但無法安全判斷時使用。單純沒有期限不是歧義，應建立 due_at=null 的 create_task。',
     parameters:{type:'object',additionalProperties:false,properties:{
       title:{type:'string',maxLength:100},proposed_at:{type:['string','null']},question:{type:'string',maxLength:220},category:{type:'string',enum:categories},importance:importanceProperty,...common,
     },required:['title','proposed_at','question','category','importance','confidence','reason']}
   },
   {
     type:'function',name:'ignore_notification',strict:true,
-    description:'一般聊天、廣告、社群互動、新聞、驗證碼、純狀態通知或不需要建立提醒/行程時使用。',
+    description:'一般聊天、廣告、社群互動、新聞、驗證碼、純狀態通知或不需要建立提醒/行程/待辦時使用。',
     parameters:{type:'object',additionalProperties:false,properties:{...common},required:['confidence','reason']}
   }
 ] as const;
@@ -94,7 +94,10 @@ export function parseAiToolCall(call:{name?:unknown;arguments?:unknown}, existin
     if(!validIso(a.start_at))throw new Error('AI 沒有提供有效的行程時間。');
     return {type:'create_calendar_event',title:String(a.title??'').trim().slice(0,100)||'未命名行程',startAt:new Date(a.start_at).toISOString(),endAt:validIso(a.end_at)?new Date(a.end_at).toISOString():null,allDay:!!a.all_day,location:typeof a.location==='string'&&a.location.trim()?a.location.trim().slice(0,200):null,reminderMinutes:Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)),category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason};
   }
-  if(call.name==='create_task')return {type:'create_task',title:String(a.title??'').trim().slice(0,100)||'未命名待辦',dueAt:validIso(a.due_at)?new Date(a.due_at).toISOString():null,reminderMinutes:a.reminder_minutes===null?null:Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)),category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason};
+  if(call.name==='create_task'){
+    const dueAt=validIso(a.due_at)?new Date(a.due_at).toISOString():null;
+    return {type:'create_task',title:String(a.title??'').trim().slice(0,100)||'未命名待辦',dueAt,reminderMinutes:dueAt&&a.reminder_minutes!==null?Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)):null,category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason};
+  }
   if(call.name==='ask_user')return {type:'ask_user',title:String(a.title??'').trim().slice(0,100)||'需要確認的通知',proposedAt:validIso(a.proposed_at)?new Date(a.proposed_at).toISOString():null,question:String(a.question??'請確認這則通知。').slice(0,220),category:category(a.category),importance:importance(a.importance),confidence:conf,reason};
   if(call.name==='update_existing_event'){
     const eventId=String(a.event_id??'');if(!existingIds.has(eventId))throw new Error('AI 指定了不存在的既有行程。');
@@ -116,7 +119,7 @@ async function requestDecision(apiKey:string, model:AiModel, input:any, existing
       parallel_tool_calls:false,
       tool_choice:'required',
       tools,
-      instructions:'你是生活通知管家的行程判斷器。閱讀單一手機通知或截圖後，必須只選一個工具。重點是理解語意，不要只靠關鍵字。相對日期必須以提供的 received_at 與 device_timezone 換算。沒有足夠證據時絕對不要猜日期、時間、地點或人物；改用 ask_user。預設要非常安靜：一般聊天、貼圖、社群互動、廣告、促銷、新聞、Samsung Rewards/點數、電池/省電模式、裝置狀態、下載完成、同步狀態、驗證碼，即使出現時間或「請」等文字，只要使用者沒有明確要參加/完成/付款/領取/回覆的行動，就用 ignore_notification。只有值得放進行程或待辦的內容才 create；取消、改期、臨近期限等可標 urgent，需要主動注意的截止/預約/課程/會議標 important，其餘值得記錄但不緊急的才標 normal。若內容是既有活動的延期/更正，且 existing_upcoming_events 有明確對應，使用 update_existing_event。標題要短、自然、可直接放入行事曆。',
+      instructions:'你是生活通知管家的行程與待辦判斷器。閱讀單一手機通知或截圖後，必須只選一個工具。重點是理解語意，不要只靠關鍵字。相對日期必須以提供的 received_at 與 device_timezone 換算。沒有足夠證據時絕對不要猜日期、時間、地點或人物。明確有日期/時間發生的活動用 create_calendar_event；明確要完成的動作用 create_task。特別重要：如果任務本身很明確、只是沒有任何期限，直接用 create_task 並將 due_at 與 reminder_minutes 設為 null，這是正常的無期限 Todo，不要 ask_user 問時間。只有意圖本身有歧義，或原文確實提到時間但無法安全判定時才 ask_user。預設要非常安靜：一般聊天、貼圖、社群互動、廣告、促銷、新聞、Samsung Rewards/點數、電池/省電模式、裝置狀態、下載完成、同步狀態、驗證碼，只要使用者沒有明確要參加/完成/付款/領取/回覆的行動，就用 ignore_notification。取消、改期、臨近期限等可標 urgent，需要主動注意的截止/預約/課程/會議標 important，無期限待辦通常標 normal。若內容是既有活動的延期/更正，且 existing_upcoming_events 有明確對應，使用 update_existing_event。標題要短、自然、可以直接顯示在行程或 Todo 清單。',
       input,
     })
   });
