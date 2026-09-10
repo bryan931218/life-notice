@@ -1,3 +1,4 @@
 Life Notice AI v1.2 build ready
 patch-sha256=fbfae01307e5265f7877c162b43804dcc207abb5f289786c012b765bbb0edbf4
 AI_KEY_EMBEDDED=false
+attempt=2
