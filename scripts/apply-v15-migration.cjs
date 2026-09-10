@@ -77,4 +77,15 @@ app=mustReplace(
 app=app.replace('版本 1.4.3','版本 1.5.0');
 writeIfChanged('src/App.tsx',app);
 
+const nativePath='modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt';
+let native=fs.readFileSync(nativePath,'utf8');
+native=native.replaceAll('Pair<Notification.Action, Array<RemoteInput>>?','Pair<Notification.Action, Array<out RemoteInput>>?');
+native=mustReplace(
+  native,
+  '      inputs.forEach { input -> results.putCharSequence(input.resultKey, text.take(500)) }\n      RemoteInput.addResultsToIntent(inputs, intent, results)',
+  '      inputs.forEach { input -> results.putCharSequence(input.resultKey, text.take(500)) }\n      val inputArray = inputs.map { it }.toTypedArray()\n      RemoteInput.addResultsToIntent(inputArray, intent, results)',
+  'RemoteInput variance bridge'
+);
+writeIfChanged(nativePath,native);
+
 console.log('v1.5 migration applied');
