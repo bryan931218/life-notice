@@ -6,6 +6,7 @@ import org.json.JSONObject
 
 internal data class ReplyTarget(
   val id: String,
+  val notificationKey: String,
   val packageName: String,
   val title: String,
   val text: String,
@@ -21,20 +22,22 @@ internal object ReplyTargetStore {
   private fun prefs(context: Context) = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
   @Synchronized
-  fun save(context: Context, item: DetectedNotice) {
+  fun save(context: Context, item: DetectedNotice, notificationKey: String) {
+    if (notificationKey.isBlank()) return
     val now = System.currentTimeMillis()
     val current = all(context)
       .filter { it.id != item.id && now - it.receivedAt <= TTL }
       .toMutableList()
-    current.add(0, ReplyTarget(item.id, item.packageName, item.title, item.text, item.receivedAt))
+    current.add(0, ReplyTarget(item.id, notificationKey, item.packageName, item.title, item.text, item.receivedAt))
     write(context, current.take(MAX))
   }
 
   @Synchronized
   fun get(context: Context, id: String): ReplyTarget? {
     val now = System.currentTimeMillis()
-    val current = all(context).filter { now - it.receivedAt <= TTL }
-    if (current.size != all(context).size) write(context, current)
+    val original = all(context)
+    val current = original.filter { now - it.receivedAt <= TTL }
+    if (current.size != original.size) write(context, current)
     return current.firstOrNull { it.id == id }
   }
 
@@ -46,11 +49,12 @@ internal object ReplyTargetStore {
         val o = array.optJSONObject(index) ?: return@mapNotNull null
         ReplyTarget(
           id = o.optString("id"),
+          notificationKey = o.optString("notificationKey"),
           packageName = o.optString("packageName"),
           title = o.optString("title"),
           text = o.optString("text"),
           receivedAt = o.optLong("receivedAt")
-        ).takeIf { it.id.isNotBlank() && it.packageName.isNotBlank() }
+        ).takeIf { it.id.isNotBlank() && it.notificationKey.isNotBlank() && it.packageName.isNotBlank() }
       }
     }.getOrDefault(emptyList())
   }
@@ -60,6 +64,7 @@ internal object ReplyTargetStore {
     values.forEach { item ->
       array.put(JSONObject().apply {
         put("id", item.id)
+        put("notificationKey", item.notificationKey)
         put("packageName", item.packageName)
         put("title", item.title)
         put("text", item.text)
