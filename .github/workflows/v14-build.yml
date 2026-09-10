@@ -97,16 +97,21 @@ jobs:
           gh release create "$TAG" life-notice-v1.5.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "生活通知管家 v1.5 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.5：更聰明的相對時間判斷、AI 多工具規劃、取消/完成既有項目、AI 快速回覆建議，以及支援 Messenger/LINE 原始通知 RemoteInput 的點按回覆。AI 不會自動替使用者傳訊息。"
+            --notes "v1.5：多則聊天上下文、Google Maps 地點連結、較少無謂時間確認、AI 多工具規劃、取消/完成既有項目、AI 快速回覆建議，以及 Messenger/LINE 原始通知 RemoteInput 點按回覆。AI 不會自動替使用者傳訊息。"
 
       - name: Persist migrated v1.5 source
         shell: bash
         run: |
           set -euo pipefail
-          if ! git diff --quiet -- src/App.tsx src/domain.ts; then
+          PATHS=(
+            src/App.tsx
+            src/domain.ts
+            modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt
+          )
+          if ! git diff --quiet -- "${PATHS[@]}"; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src/App.tsx src/domain.ts
-            git commit -m "Materialize v1.5 smart assistant UI"
+            git add "${PATHS[@]}"
+            git commit -m "Materialize v1.5 smart assistant source"
             git push origin HEAD:v14-build
           fi
