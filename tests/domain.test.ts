@@ -37,3 +37,38 @@ describe('即時通知自動整理',()=>{
     assert.equal(r.time,'09:00');
   });
 });
+
+import {cleanAutoEventTitle,dedupeAutoNotices,isDuplicateAutoNotice} from '../src/dedupe.ts';
+
+const auto=(id:string,title:string,dueAt:string|null,minute=0):Notice=>({
+  ...n,id,title,dueAt,source:`[AI自動偵測｜時鐘]\n${title}\n[偵測ID:${id}]`,
+  createdAt:new Date(Date.parse('2026-09-11T03:59:00Z')+minute*60000).toISOString(),
+  updatedAt:new Date(Date.parse('2026-09-11T03:59:00Z')+minute*60000).toISOString(),
+  needsReview:false,aiConfidence:.94
+});
+
+describe('自動事件去重',()=>{
+  it('把貪睡版本視為同一事件',()=>{
+    const a=auto('1','寬生日','2026-09-11T03:59:00Z');
+    const b=auto('2','寬生日(貪睡)','2026-09-11T04:04:00Z',5);
+    assert.equal(cleanAutoEventTitle(b.title),'寬生日');
+    assert.equal(isDuplicateAutoNotice(a,b),true);
+    const result=dedupeAutoNotices([b,a]);
+    assert.equal(result.length,1);
+    assert.equal(result[0].title,'寬生日');
+  });
+  it('同來源同標題短時間重複只留一筆',()=>{
+    const result=dedupeAutoNotices([
+      auto('1','填寫畢業領巾隼鳥表單','2026-09-11T04:00:00Z'),
+      auto('2','填寫畢業領巾隼鳥表單','2026-09-11T04:01:00Z',1),
+      auto('3','填寫畢業領巾隼鳥表單','2026-09-11T04:02:00Z',2),
+    ]);
+    assert.equal(result.length,1);
+  });
+  it('不同時間的真實事件與手動事件不會被誤合併',()=>{
+    const morning=auto('1','排球練習','2026-09-11T01:00:00Z');
+    const noon=auto('2','排球練習','2026-09-11T04:00:00Z',180);
+    const manual={...auto('3','排球練習','2026-09-11T01:00:00Z'),source:'我手動建立'};
+    assert.equal(dedupeAutoNotices([morning,noon,manual]).length,3);
+  });
+});
