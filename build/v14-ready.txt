@@ -14,4 +14,4 @@ web-links=clickable-from-event-detail
 messenger=relative-time+daypart+casual-plan+remoteinput-direct-reply
 ai-tools=create-calendar+create-todo+update+cancel+complete+ask+ignore+suggest-replies
 reply=explicit-user-tap-only
-retry=11
+retry=12
