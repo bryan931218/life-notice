@@ -17,6 +17,17 @@ jobs:
       - name: Checkout AI source
         uses: actions/checkout@v4
 
+      - name: Restore verified v1.2 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat staging/ai-v12-patch-part-* | base64 -d > /tmp/ai-v12-patch.tar.gz
+          echo "fbfae01307e5265f7877c162b43804dcc207abb5f289786c012b765bbb0edbf4  /tmp/ai-v12-patch.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/ai-v12-patch.tar.gz -C .
+          cp staging/notice-listener-AndroidManifest.xml modules/notice-listener/android/src/main/AndroidManifest.xml
+          cp staging/LifeNoticeListenerService.kt modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt
+          cp staging/NoticeListenerModule.kt modules/notice-listener/android/src/main/java/expo/modules/noticelistener/NoticeListenerModule.kt
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -32,10 +43,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install dependencies and verify
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Ensure generated icon assets exist
+        shell: bash
         run: |
-          npm install --no-audit --no-fund
-          npm run verify
+          test -f assets/icon.png
+          test -f assets/notification-icon.png
+          if [ ! -f assets/adaptive-icon.png ]; then cp assets/icon.png assets/adaptive-icon.png; fi
+
+      - name: Verify app
+        run: npm run verify
 
       - name: Generate Android native project
         env:
@@ -49,7 +68,7 @@ jobs:
         run: |
           chmod +x android/gradlew
           cd android
-          ./gradlew :app:assembleRelease --no-daemon
+          ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Prepare APK
         run: cp android/app/build/outputs/apk/release/app-release.apk life-notice-ai-v12.apk
@@ -64,9 +83,11 @@ jobs:
       - name: Publish preview release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          set -euo pipefail
           TAG="ai-preview-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" life-notice-ai-v12.apk \
             --target "$GITHUB_SHA" \
             --title "生活通知管家 AI 測試版 v1.2 #${GITHUB_RUN_NUMBER}" \
-            --notes "AI 預設關閉。請在 App 設定中輸入你自己新建立的 OpenAI API key；不要使用已公開或已撤銷的 key。"
+            --notes "AI 預設關閉。Android 可自動擷取已授權的通知候選；AI 開啟後可用工具呼叫判斷建立、更新、詢問或忽略。API key 不內建於 APK，請在 App 設定中輸入你自己新建立的 key。"
