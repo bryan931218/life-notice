@@ -1,0 +1,5 @@
+Life Notice v1.3 calendar build ready
+overlay-sha256=387a66bb5f9509f453a3bcc9939e515b561fd8af86d6d76b9b8a6a18e47b32e2
+AI_KEY_EMBEDDED=false
+alerts=important-only-default
+calendar=monthly-agenda
