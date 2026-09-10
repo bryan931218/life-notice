@@ -7,7 +7,7 @@ const privacyUrl = process.env.PRIVACY_URL || '';
 const config: ExpoConfig = {
   name: '生活通知管家',
   slug: 'life-notice',
-  version: '1.4.0',
+  version: '1.5.0',
   orientation: 'default',
   userInterfaceStyle: 'light',
   scheme: 'lifenotice',
@@ -15,7 +15,7 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: appId,
-    buildNumber: '5',
+    buildNumber: '6',
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       CFBundleLocalizations: ['zh-Hant', 'en'],
@@ -29,7 +29,7 @@ const config: ExpoConfig = {
   android: {
     package: appId,
     permissions: ['android.permission.READ_CALENDAR', 'android.permission.WRITE_CALENDAR'],
-    versionCode: 5,
+    versionCode: 6,
     allowBackup: false,
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
