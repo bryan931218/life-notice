@@ -6,6 +6,7 @@ import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import {requireOptionalNativeModule} from 'expo-modules-core';
 import {EMPTY,reminderPlan,toCalendar,validateBackup,type State,type Notice} from './domain';
+import {dedupeAutoNotices} from './dedupe';
 import type {AiModel} from './ai';
 const KEY='life-notice-v1';
 const AUTO_CALENDAR_KEY='life-notice-auto-calendar-v1';
@@ -15,7 +16,6 @@ const OPENAI_KEY_KEY='life-notice-openai-key-v1';
 const LUNA:AiModel='gpt-5.6-luna';
 export type AiSettings={enabled:boolean;model:AiModel};
 export type AlertLevel='important'|'balanced'|'all';
-const DEFAULT_AI:AiSettings={enabled:false,model:LUNA};
 const AUTO_SOURCE=/^\[(?:AI)?自動偵測｜/;
 const OBVIOUS_NOISE=/Samsung\s*Rewards|Rewards|獲得\s*\d+\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|驗證碼|認證碼|一次性密碼|\bOTP\b|verification\s*code|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞|推薦文章|每日精選|購物優惠|會員好康|#請益|數位城市迷彩/i;
 
@@ -83,19 +83,18 @@ export async function load():Promise<State>{
   const raw=await AsyncStorage.getItem(KEY);if(!raw)return {...EMPTY,members:[...EMPTY.members],notices:[]};
   const saved=JSON.parse(raw);const validated=validateBackup(saved);
   const restored=validated.notices.map((n,i)=>({...n,sourceImage:typeof saved.notices[i]?.sourceImage==='string' && FS.documentDirectory && saved.notices[i].sourceImage.startsWith(FS.documentDirectory)?saved.notices[i].sourceImage:undefined}));
-  const seen=new Set<string>();
-  const notices=restored.filter(n=>{
-    if(!AUTO_SOURCE.test(n.source))return true;
-    if(isObviousNoiseText(`${n.title}\n${n.source}`))return false;
-    const normalized=n.source.replace(/\n?\[偵測ID:[^\]]+\]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-    const fingerprint=`${n.title.trim().toLowerCase()}|${n.dueAt??''}|${normalized}`;
-    if(seen.has(fingerprint))return false;seen.add(fingerprint);return true;
-  });
+  const filtered=restored.filter(n=>!AUTO_SOURCE.test(n.source)||!isObviousNoiseText(`${n.title}\n${n.source}`));
+  const notices=dedupeAutoNotices(filtered);
   const result={...validated,welcomed:!!saved.welcomed,notices};
-  if(notices.length!==restored.length)await AsyncStorage.setItem(KEY,JSON.stringify(result));
+  if(notices.length!==restored.length||notices.some((n,i)=>n.title!==restored[i]?.title))await AsyncStorage.setItem(KEY,JSON.stringify(result));
   return result;
 }
-export async function persist(s:State){await AsyncStorage.setItem(KEY,JSON.stringify(s));}
+export async function persist(s:State){
+  // Keep the in-memory object and stored data in sync so duplicate notification updates
+  // disappear immediately instead of only after the next app restart.
+  s.notices=dedupeAutoNotices(s.notices);
+  await AsyncStorage.setItem(KEY,JSON.stringify(s));
+}
 export async function recognize(uri:string):Promise<string>{const ocr=requireOptionalNativeModule<{recognize(uri:string):Promise<string>}>('NoticeOcr');if(!ocr)throw new Error('此安裝包缺少截圖辨識模組，請更新到最新版 APK。');return ocr.recognize(uri);}
 export async function keepImage(uri:string):Promise<string>{if(Platform.OS==='web')return uri;const folder=FS.documentDirectory+'sources/';await FS.makeDirectoryAsync(folder,{intermediates:true});const dest=folder+Date.now()+'-'+Math.random().toString(36).slice(2)+'.jpg';await FS.copyAsync({from:uri,to:dest});return dest;}
 export async function removeImage(uri?:string){if(uri && FS.documentDirectory && uri.startsWith(FS.documentDirectory+'sources/'))await FS.deleteAsync(uri,{idempotent:true});}
