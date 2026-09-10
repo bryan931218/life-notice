@@ -1,0 +1,6 @@
+const fs=require('fs');
+const path=require('path');
+const sharp=require(process.env.SHARP_MODULE||'sharp');
+const bg='#126953';
+const bell='<path d="M352 610h320l-42-67V422c0-74-47-124-118-124s-118 50-118 124v121z" fill="none" stroke="white" stroke-width="40" stroke-linejoin="round"/><path d="M468 674q44 48 88 0" fill="none" stroke="white" stroke-width="36" stroke-linecap="round"/><circle cx="653" cy="331" r="60" fill="#DAECA1"/><path d="m631 331 15 16 31-36" fill="none" stroke="#126953" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>';
+(async()=>{for(const [name,size,background] of [['icon.png',1024,true],['adaptive-icon.png',1024,false],['notification-icon.png',96,false]]){let shape=name==='notification-icon.png'?'<path d="M25 65h46l-7-10V39c0-22-32-22-32 0v16z" fill="white"/><circle cx="48" cy="76" r="6" fill="white"/>':bell;const view=name==='notification-icon.png'?96:1024;const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${view} ${view}">${background?`<rect width="1024" height="1024" fill="${bg}"/>`:''}${shape}</svg>`;await sharp(Buffer.from(svg)).png().toFile(path.join(__dirname,'../assets',name));}console.log('App icons generated.');})();
