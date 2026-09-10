@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -12,7 +13,7 @@ import android.service.notification.StatusBarNotification
 class LifeNoticeListenerService : NotificationListenerService() {
   companion object {
     private const val CHANNEL_ID = "life-notice-auto-detected"
-    private const val CHANNEL_NAME = "自動偵測的重要通知"
+    private const val CHANNEL_NAME = "重要行程"
 
     private val DATE = Regex("(?:20\\d{2}[年./-])?\\s*(?:1[0-2]|0?[1-9])[月./-](?:3[01]|[12]\\d|0?[1-9])(?:日|號)?")
     private val RELATIVE = Regex("今天|今晚|明天|明晚|後天|大後天|這週|本週|下週|下星期|週[一二三四五六日天]|星期[一二三四五六日天]")
@@ -34,8 +35,6 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val aiMode = DetectedStore.aiMode(applicationContext)
     val category = notification.category.orEmpty()
     val messageLike = category == Notification.CATEGORY_MESSAGE || category == Notification.CATEGORY_EMAIL || category == Notification.CATEGORY_EVENT || category == Notification.CATEGORY_REMINDER || category == Notification.CATEGORY_SOCIAL
-    // Local mode stays conservative. AI mode keeps broader messaging/event candidates so
-    // semantic analysis can decide instead of hard-coded keyword rules.
     if ((!aiMode && score < 5) || (aiMode && score < 1 && !messageLike)) return
 
     val now = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
@@ -49,11 +48,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
   }
 
   private fun shouldNotifyNow(text: String, score: Int): Boolean {
-    val level = DetectedStore.alertLevel(applicationContext)
-    if (level == "all") return score >= 5
-    if (level == "balanced") return score >= 8
-
-    // Default: keep the app quiet. Only interrupt for strong, actionable signals.
+    // v1.4 deliberately uses one quiet policy: only interrupt for strong actionable signals.
     val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
     val hasStrong = STRONG.containsMatchIn(text)
     val urgentChange = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知").containsMatchIn(text)
@@ -94,21 +89,24 @@ class LifeNoticeListenerService : NotificationListenerService() {
     }
     val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
       putExtra("openAutoDetected", true)
-      addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
     val pending = launch?.let {
       PendingIntent.getActivity(this, item.id.hashCode(), it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
+    val captureIntent = Intent(this, QuickCaptureReceiver::class.java).putExtra("noticeId", item.id)
+    val capturePending = PendingIntent.getBroadcast(this, item.id.hashCode() xor 0x43A7, captureIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val preview = item.text.replace("\n", " ").take(120)
     val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
     builder
       .setSmallIcon(applicationInfo.icon)
-      .setContentTitle("重要行程已偵測")
+      .setContentTitle("偵測到重要行程")
       .setContentText("${item.appName} · $preview")
-      .setStyle(Notification.BigTextStyle().bigText("來源：${item.appName}\n$preview\n\n已靜默整理到生活通知管家；需要時再開啟確認。"))
+      .setStyle(Notification.BigTextStyle().bigText("來源：${item.appName}\n$preview"))
       .setAutoCancel(true)
       .setCategory(Notification.CATEGORY_REMINDER)
       .setContentIntent(pending)
+      .addAction(0, "加入行事曆", capturePending)
     manager.notify(item.id.hashCode(), builder.build())
   }
 }
