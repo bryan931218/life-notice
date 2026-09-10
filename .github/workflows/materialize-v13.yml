@@ -1,0 +1,46 @@
+name: Materialize verified v1.3 source
+
+on:
+  push:
+    branches: [v14-build]
+    paths:
+      - 'build/materialize-v13.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v14-build
+          fetch-depth: 0
+
+      - name: Restore verified v1.3 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat staging/ai-v12-patch-part-* | base64 -d > /tmp/ai-v12-patch.tar.gz
+          echo "fbfae01307e5265f7877c162b43804dcc207abb5f289786c012b765bbb0edbf4  /tmp/ai-v12-patch.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/ai-v12-patch.tar.gz -C .
+          cp staging/notice-listener-AndroidManifest.xml modules/notice-listener/android/src/main/AndroidManifest.xml
+
+          cat staging/v13-safe-* | base64 -d > /tmp/v13-overlay.tar.gz
+          echo "387a66bb5f9509f453a3bcc9939e515b561fd8af86d6d76b9b8a6a18e47b32e2  /tmp/v13-overlay.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/v13-overlay.tar.gz -C .
+
+      - name: Commit normal source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- App.tsx index.ts src modules tests docs package.json package-lock.json app.config.ts eas.json scripts assets README.md .env.example .gitignore || true
+          if git diff --cached --quiet; then
+            echo "No source changes to materialize"
+          else
+            git commit -m "Materialize verified v1.3 source"
+            git push origin HEAD:v14-build
+          fi
