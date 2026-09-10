@@ -24,12 +24,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cp .github/workflows/bootstrap-life-notice.yml /tmp/bootstrap-life-notice.yml
           cat bootstrap/source-00 bootstrap/source-01 bootstrap/source-02 bootstrap/source-03 | base64 -d > /tmp/life-notice-source.tar.gz
           echo "5ca3971dd2bd1f9ccf6252e2d71dc1b71aceaa17d218aa38a9baf129225b59a8  /tmp/life-notice-source.tar.gz" | sha256sum -c -
           mkdir -p /tmp/life-notice-source
           tar -xzf /tmp/life-notice-source.tar.gz -C /tmp/life-notice-source
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a /tmp/life-notice-source/. .
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp /tmp/bootstrap-life-notice.yml .github/workflows/bootstrap-life-notice.yml
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -95,5 +99,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Import Life Notice app and release pipeline"
+          git commit -m "Import Life Notice app source"
           git push --force origin HEAD:main
