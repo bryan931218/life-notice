@@ -1,0 +1,72 @@
+name: Build Life Notice AI v1.2 APK
+
+on:
+  push:
+    branches: [ai-v12-build]
+    paths:
+      - 'build/ai-v12-ready.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  build-ai-v12:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AI source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install dependencies and verify
+        run: |
+          npm install --no-audit --no-fund
+          npm run verify
+
+      - name: Generate Android native project
+        env:
+          CI: 1
+          NODE_ENV: production
+        run: npm run prebuild:android
+
+      - name: Build installable APK
+        env:
+          NODE_ENV: production
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Prepare APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk life-notice-ai-v12.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: life-notice-ai-v12
+          path: life-notice-ai-v12.apk
+          if-no-files-found: error
+
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="ai-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-ai-v12.apk \
+            --target "$GITHUB_SHA" \
+            --title "生活通知管家 AI 測試版 v1.2 #${GITHUB_RUN_NUMBER}" \
+            --notes "AI 預設關閉。請在 App 設定中輸入你自己新建立的 OpenAI API key；不要使用已公開或已撤銷的 key。"
