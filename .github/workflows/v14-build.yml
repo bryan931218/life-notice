@@ -1,4 +1,4 @@
-name: Build Life Notice v1.4 Android
+name: Build Life Notice v1.5 Android
 
 on:
   push:
@@ -10,13 +10,13 @@ permissions:
   contents: write
 
 jobs:
-  build-v14:
+  build-v15:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
       APP_IDENTIFIER: com.bryan931218.lifenotice
     steps:
-      - name: Checkout v1.4
+      - name: Checkout v1.5
         uses: actions/checkout@v4
         with:
           ref: v14-build
@@ -38,6 +38,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Apply v1.5 source migration
+        run: node scripts/apply-v15-migration.cjs
 
       - name: Ensure generated assets
         shell: bash
@@ -69,17 +72,17 @@ jobs:
       - name: Prepare packages
         shell: bash
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.4.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.4.aab
-          sha256sum life-notice-v1.4.apk life-notice-v1.4.aab > SHA256SUMS.txt
+          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.aab
+          sha256sum life-notice-v1.5.apk life-notice-v1.5.aab > SHA256SUMS.txt
 
       - name: Upload Android packages
         uses: actions/upload-artifact@v4
         with:
-          name: life-notice-v1.4-android
+          name: life-notice-v1.5-android
           path: |
-            life-notice-v1.4.apk
-            life-notice-v1.4.aab
+            life-notice-v1.5.apk
+            life-notice-v1.5.aab
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -90,8 +93,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="v14-preview-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" life-notice-v1.4.apk SHA256SUMS.txt \
+          TAG="v15-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v1.5.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
-            --title "生活通知管家 v1.4 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.4：極簡介面、固定使用 GPT-5.6 Luna、預設重要才提醒、內建月曆、Android 快速設定『擷取行程』與重要通知的『加入行事曆』動作。AI 預設關閉且 API key 不內建。"
+            --title "生活通知管家 v1.5 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.5：更聰明的相對時間判斷、AI 多工具規劃、取消/完成既有項目、AI 快速回覆建議，以及支援 Messenger/LINE 原始通知 RemoteInput 的點按回覆。AI 不會自動替使用者傳訊息。"
+
+      - name: Persist migrated v1.5 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- src/App.tsx src/domain.ts; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/App.tsx src/domain.ts
+            git commit -m "Materialize v1.5 smart assistant UI"
+            git push origin HEAD:v14-build
+          fi
