@@ -1,9 +1,9 @@
 Life Notice v1.4 build ready
-version=1.4.0
+version=1.4.1-hotfix
 model=gpt-5.6-luna
 AI_KEY_EMBEDDED=false
 quiet-default=important
 quick-capture=android-qs-tile+notification-action
 calendar=monthly
-hotfix=ai-strict-schema+aggressive-notification-filter
-retry=3
+hotfix=ai-strict-schema+aggressive-notification-filter+native-mlkit-ocr+stored-noise-cleanup+api-key-validation
+retry=4
