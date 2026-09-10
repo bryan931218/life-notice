@@ -18,7 +18,7 @@ internal object QuickCapture {
   private val weekday = Regex("""(下週|下星期)?(?:週|星期)([一二三四五六日天])""")
   private val relative = Regex("今天|今晚|明天|明晚|後天|大後天")
   private val time = Regex("""(上午|早上|中午|下午|晚上|晚間|凌晨)?\s*([01]?\d|2[0-3])(?:[:：點時]\s*([0-5]?\d)?)""")
-  private val leading = Regex("^(?:請|記得|務必|別忘了?|麻煩|提醒(?:一下)?)[：:，,\s]*")
+  private val leading = Regex("""^(?:請|記得|務必|別忘了?|麻煩|提醒(?:一下)?)[：:，,\s]*""")
 
   fun capture(context: Context, item: DetectedNotice): QuickCaptureResult {
     val text = listOf(item.title, item.text).filter { it.isNotBlank() }.distinct().joinToString("\n")
@@ -52,7 +52,7 @@ internal object QuickCapture {
       if (cursor.moveToFirst()) cursor.getLong(0) else null
     } ?: return QuickCaptureResult(false, "找不到可寫入的手機行事曆。")
 
-    val title = eventTitle(item, text)
+    val title = eventTitle(item)
     val values = ContentValues().apply {
       put(CalendarContract.Events.CALENDAR_ID, calendarId)
       put(CalendarContract.Events.TITLE, title)
@@ -71,7 +71,7 @@ internal object QuickCapture {
     return QuickCaptureResult(true, if (allDay) "已加入全天行程：$title" else "已加入行事曆：$title")
   }
 
-  private fun eventTitle(item: DetectedNotice, text: String): String {
+  private fun eventTitle(item: DetectedNotice): String {
     val body = item.text.lineSequence().map { it.trim() }.firstOrNull { it.length >= 2 }.orEmpty()
     val cleaned = (body.ifBlank { item.title })
       .replace(numericDate, " ")
@@ -79,7 +79,7 @@ internal object QuickCapture {
       .replace(weekday, " ")
       .replace(time, " ")
       .replace(leading, "")
-      .replace(Regex("[，,。.!！?？\s]{2,}"), " ")
+      .replace(Regex("""[，,。.!！?？\s]{2,}"""), " ")
       .trim(' ', '，', ',', '。', '.', '：', ':')
     return (cleaned.takeIf { it.length >= 2 } ?: "${item.appName} 行程").take(80)
   }
