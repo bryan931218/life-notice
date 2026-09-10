@@ -4,8 +4,7 @@ on:
   push:
     branches: [ai-v12-build]
     paths:
-      - 'staging/ai-v12-ready.txt'
-  workflow_dispatch:
+      - 'build/ai-v12-ready.txt'
 
 permissions:
   contents: write
@@ -15,19 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout staging branch
+      - name: Checkout AI source
         uses: actions/checkout@v4
-        with:
-          ref: ai-v12-build
-
-      - name: Restore verified v1.2 source
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat staging/ai-v12-part-* | base64 -d > /tmp/life-notice-ai-v12.tar.gz
-          echo "b1542dec27c0d5e3be3ef46e225f514a9b011e7207961194422d7f7135a65df2  /tmp/life-notice-ai-v12.tar.gz" | sha256sum -c -
-          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github -exec rm -rf {} +
-          tar -xzf /tmp/life-notice-ai-v12.tar.gz -C .
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -76,24 +64,9 @@ jobs:
       - name: Publish preview release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          set -euo pipefail
           TAG="ai-preview-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" life-notice-ai-v12.apk \
             --target "$GITHUB_SHA" \
             --title "生活通知管家 AI 測試版 v1.2 #${GITHUB_RUN_NUMBER}" \
-            --notes "Android v1.2 AI 測試版。AI 預設關閉；請在 App 設定中使用你自己新建立的 OpenAI API key。不要使用已公開或已撤銷的 key。"
-
-      - name: Commit clean verified source to main
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f life-notice-ai-v12.apk
-          rm -rf android ios dist staging
-          printf '\n# Generated build outputs\nandroid/\nios/\ndist/\n**/build/\n*.apk\n*.aab\n' >> .gitignore
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Release Life Notice v1.2 AI notification assistant"
-          git push --force origin HEAD:main
+            --notes "AI 預設關閉。請在 App 設定中輸入你自己新建立的 OpenAI API key；不要使用已公開或已撤銷的 key。"
