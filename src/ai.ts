@@ -1,12 +1,11 @@
 import type {Category, Importance, Notice} from './domain';
+import {isGoogleMapsUrl,resolveGoogleMapsLinks,type SharedLinkInfo} from './links';
 
-export const AI_MODELS = [
-  ['gpt-5.6-luna','GPT-5.6 Luna'],
-] as const;
-export type AiModel = typeof AI_MODELS[number][0];
+export const AI_MODELS=[['gpt-5.6-luna','GPT-5.6 Luna']] as const;
+export type AiModel=typeof AI_MODELS[number][0];
 
 type Replyable={replySuggestions:string[]};
-export type AiDecision =
+export type AiDecision=
   | ({type:'create_calendar_event';title:string;startAt:string;endAt:string|null;allDay:boolean;location:string|null;reminderMinutes:number;category:Category;checklist:string[];importance:Importance;confidence:number;reason:string}&Replyable)
   | ({type:'create_task';title:string;dueAt:string|null;reminderMinutes:number|null;category:Category;checklist:string[];importance:Importance;confidence:number;reason:string}&Replyable)
   | ({type:'update_existing_event';eventId:string;title:string|null;startAt:string|null;endAt:string|null;location:string|null;reminderMinutes:number|null;importance:Importance;confidence:number;reason:string}&Replyable)
@@ -16,7 +15,6 @@ export type AiDecision =
   | {type:'ignore_notification';confidence:number;reason:string};
 
 type AnalyzeArgs={apiKey:string;model:AiModel;appName:string;title:string;text:string;receivedAt:number;existing:Notice[]};
-
 const categories=['生活','學校','帳單','取件','活動'];
 const importanceProperty={type:'string',enum:['normal','important','urgent'],description:'normal=一般但值得記錄；important=需要主動提醒；urgent=取消、改期、即將截止或其他應立刻注意的事項。低價值聊天應使用 ignore_notification。'};
 const common={confidence:{type:'number',minimum:0,maximum:1,description:'0 到 1，代表你對這個動作的信心。'},reason:{type:'string',maxLength:240,description:'用繁體中文簡短說明為何選這個動作。'}};
@@ -38,7 +36,7 @@ function cleanReplies(v:unknown){return Array.isArray(v)?[...new Set(v.filter(x=
 function confidence(v:unknown){const n=Number(v);return Number.isFinite(n)?Math.max(0,Math.min(1,n)):0;}
 function importance(v:unknown):Importance{return v==='urgent'?'urgent':v==='important'?'important':'normal';}
 
-export function parseAiToolCall(call:{name?:unknown;arguments?:unknown}, existingIds=new Set<string>()):AiDecision{
+export function parseAiToolCall(call:{name?:unknown;arguments?:unknown},existingIds=new Set<string>()):AiDecision{
   if(typeof call.name!=='string'||typeof call.arguments!=='string')throw new Error('AI 沒有回傳可執行的工具。');
   let a:any;try{a=JSON.parse(call.arguments)}catch{throw new Error('AI 工具參數格式錯誤。')}
   const reason=String(a.reason??'').slice(0,240),conf=confidence(a.confidence),replySuggestions:string[]=[];
@@ -90,11 +88,21 @@ function promoteNeedlessConfirmation(decision:AiDecision,text:string,receivedAt:
   return {type:'create_calendar_event',title,startAt:new Date(at).toISOString(),endAt:null,allDay:false,location:map,reminderMinutes:60,category:'活動',checklist:[],importance:decision.importance,confidence:Math.max(0.86,decision.confidence),reason:'時間可由對話上下文與收到通知的時間安全推得，不需要再次確認。',replySuggestions:decision.replySuggestions};
 }
 
+function applyResolvedLocation(decision:AiDecision,links:SharedLinkInfo[]):AiDecision{
+  if(decision.type!=='create_calendar_event'&&decision.type!=='update_existing_event')return decision;
+  const map=links.find(x=>x.type==='google_maps');
+  if(!map)return decision;
+  const current=decision.location;
+  const shouldReplace=!current||isGoogleMapsUrl(current);
+  if(!shouldReplace)return decision;
+  return {...decision,location:map.placeName??map.originalUrl};
+}
+
 async function requestDecision(apiKey:string,model:AiModel,input:any,existing:Notice[]):Promise<AiDecision>{
   const recent=existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null,is_todo:!n.dueAt}));
   const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},body:JSON.stringify({
     model,store:false,reasoning:{effort:'low'},max_output_tokens:900,parallel_tool_calls:true,tool_choice:'required',tools,
-    instructions:'你是生活通知管家的通知助理。每次分析必須呼叫剛好一個主要動作工具：create_calendar_event、create_task、update_existing_event、cancel_existing_event、complete_existing_task、ask_user、ignore_notification 其中之一。如果來源是聊天且值得回覆，可以另外再呼叫 suggest_replies 一次；suggest_replies 永遠只是建議，App 不會自動送出。\n\n【多則訊息上下文】notification_text 可能不是單一訊息，而是同一 App、同一聊天室最近約 15 分鐘內最多 8 段訊息，格式可能包含「[12 秒前] ...」。請把它們依時間當作同一段對話理解，允許一則提供日期、一則提供時間、下一則只提供地點或 Google Maps 連結。不要把每一行當成獨立事件。重複出現的相同句子只是通知更新，不代表多個事件。若已有一筆 existing_upcoming_events 與這段對話的同一約定明顯相符，而後續只是補充時間/地點/連結或改期，優先 update_existing_event，不要 create 第二筆。\n\n【時間推理】received_at 與 device_timezone 是可靠基準。相對日期必須換算。若訊息在凌晨 02:47 收到並說「晚上10.開會」，22:00 尚未發生，直接建立同一天 22:00，不要問是不是今天。「明天十點」就是隔天 10:00。「10.要吃飯嗎」在日期/邀約語境可理解為 10 點。若只有時段沒有精確鐘點，也不要因此 ask_user：為了月曆放置，早上/上午用 09:00，中午用 12:00，下午用 15:00，晚上/晚間/今晚/明晚用 19:00，並在 reason 說明為時段預設。只有時刻已明顯過去、上下文出現互相衝突的日期時間且無法判定最後版本、或真的有兩個合理日期時才 ask_user。\n\n【聊天邀約與地點】「明天晚上吃這家喔」加下一則 https://maps.app.goo.gl/... 是成立的約定：建立明天晚上的吃飯行程。若地圖連結附近有店名就用店名作 location；只有 URL 時，location 至少保留完整 Google Maps URL，不可因為只有網址而忽略。標題要像真正行事曆，例如「和陳亭霓吃晚餐」「開會」，不要寫「確認日期」「收到通知」。聊天中的問句邀約，只要時間與活動足夠明確就可建立行程並另外 suggest_replies。\n\n【其他動作】沒有期限但動作明確的事情用 create_task 且 due_at=null。取消既有事件用 cancel_existing_event，不新增「取消」行程；完成通知用 complete_existing_task；更改時間/地點用 update_existing_event。一般聊天、貼圖、廣告、社群互動、新聞、驗證碼、系統狀態等用 ignore_notification。只有錯誤建立風險真的高時才 ask_user。',input
+    instructions:'你是生活通知管家的通知助理。每次分析必須呼叫剛好一個主要動作工具：create_calendar_event、create_task、update_existing_event、cancel_existing_event、complete_existing_task、ask_user、ignore_notification 其中之一。如果來源是聊天且值得回覆，可以另外再呼叫 suggest_replies 一次；suggest_replies 永遠只是建議，App 不會自動送出。\n\n【多則訊息上下文】notification_text 可能不是單一訊息，而是同一 App、同一聊天室最近約 15 分鐘內最多 8 段訊息，格式可能包含「[12 秒前] ...」。請把它們依時間當作同一段對話理解，允許一則提供日期、一則提供時間、下一則只提供地點或 Google Maps 連結。不要把每一行當成獨立事件。重複出現的相同句子只是通知更新，不代表多個事件。若已有一筆 existing_upcoming_events 與這段對話的同一約定明顯相符，而後續只是補充時間/地點/連結或改期，優先 update_existing_event，不要 create 第二筆。\n\n【時間推理】received_at 與 device_timezone 是可靠基準。相對日期必須換算。若訊息在凌晨 02:47 收到並說「晚上10.開會」，22:00 尚未發生，直接建立同一天 22:00，不要問是不是今天。「明天十點」就是隔天 10:00。「10.要吃飯嗎」在日期/邀約語境可理解為 10 點。若只有時段沒有精確鐘點，也不要因此 ask_user：為了月曆放置，早上/上午用 09:00，中午用 12:00，下午用 15:00，晚上/晚間/今晚/明晚用 19:00，並在 reason 說明為時段預設。只有時刻已明顯過去、上下文出現互相衝突的日期時間且無法判定最後版本、或真的有兩個合理日期時才 ask_user。\n\n【聊天邀約與地點】resolved_links 是 App 在送給 AI 前對 Google Maps 短網址做的解析結果。若 resolved_links 中 place_name 有值，優先把該店名/地點名放進 location；原始網址會由 App 另外保存並提供可點擊的 Google Maps 按鈕，不要把網址混進標題。若解析不到名稱，location 可以暫時保留 Google Maps URL。「明天晚上吃這家喔」加下一則 Google Maps 網址是成立的約定，應建立明天晚上的吃飯行程。聊天中的問句邀約，只要時間與活動足夠明確就可建立行程並另外 suggest_replies。\n\n【其他動作】沒有期限但動作明確的事情用 create_task 且 due_at=null。取消既有事件用 cancel_existing_event，不新增「取消」行程；完成通知用 complete_existing_task；更改時間/地點用 update_existing_event。一般聊天、貼圖、廣告、社群互動、新聞、驗證碼、系統狀態等用 ignore_notification。只有錯誤建立風險真的高時才 ask_user。',input
   })});
   const json:any=await response.json().catch(()=>({}));
   if(!response.ok){const msg=json?.error?.message||`HTTP ${response.status}`;throw new Error(`OpenAI API 失敗：${msg}`)}
@@ -105,9 +113,11 @@ async function requestDecision(apiKey:string,model:AiModel,input:any,existing:No
 export async function analyzeNotificationWithAI(args:AnalyzeArgs):Promise<AiDecision>{
   const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Taipei';
   const recent=args.existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null,is_todo:!n.dueAt}));
-  const payload={source_app:args.appName,conversation_title:args.title,notification_text:args.text,received_at:new Date(args.receivedAt).toISOString(),device_timezone:timezone,existing_upcoming_events:recent};
-  const decision=await requestDecision(args.apiKey,args.model,`請分析以下手機通知／最近對話 JSON：\n${JSON.stringify(payload)}`,args.existing);
-  return promoteNeedlessConfirmation(decision,args.text,args.receivedAt);
+  const resolvedLinks=await resolveGoogleMapsLinks(`${args.title}\n${args.text}`);
+  const payload={source_app:args.appName,conversation_title:args.title,notification_text:args.text,received_at:new Date(args.receivedAt).toISOString(),device_timezone:timezone,resolved_links:resolvedLinks.map(x=>({type:x.type,original_url:x.originalUrl,resolved_url:x.resolvedUrl,place_name:x.placeName})),existing_upcoming_events:recent};
+  const raw=await requestDecision(args.apiKey,args.model,`請分析以下手機通知／最近對話 JSON：\n${JSON.stringify(payload)}`,args.existing);
+  const promoted=promoteNeedlessConfirmation(raw,args.text,args.receivedAt);
+  return applyResolvedLocation(promoted,resolvedLinks);
 }
 
 export async function analyzeScreenshotWithAI(args:{apiKey:string;model:AiModel;base64:string;mimeType:string;receivedAt:number;existing:Notice[]}):Promise<AiDecision>{
