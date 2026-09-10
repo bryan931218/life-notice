@@ -1,29 +1,30 @@
 {
   "name": "life-notice",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "main": "index.ts",
   "dependencies": {
-    "@expo/vector-icons": "^15.0.2",
+    "@expo/vector-icons": "15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~57.0.21",
-    "expo-clipboard": "~57.0.1",
-    "expo-dev-client": "~57.0.18",
-    "expo-document-picker": "~57.0.1",
-    "expo-file-system": "~57.0.6",
-    "expo-image-picker": "~57.0.16",
-    "expo-notifications": "~57.0.17",
-    "expo-sharing": "~57.0.18",
-    "expo-splash-screen": "~57.0.8",
-    "expo-status-bar": "~57.0.1",
+    "expo": "57.0.21",
+    "expo-clipboard": "57.0.1",
+    "expo-dev-client": "57.0.18",
+    "expo-document-picker": "57.0.1",
+    "expo-file-system": "57.0.6",
+    "expo-image-picker": "57.0.16",
+    "expo-notifications": "57.0.17",
+    "expo-sharing": "57.0.18",
+    "expo-splash-screen": "57.0.8",
+    "expo-status-bar": "57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0",
-    "react-native-web": "^0.21.2"
+    "react-native-safe-area-context": "5.7.0",
+    "react-native-web": "0.21.2",
+    "expo-secure-store": "57.0.3"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "@types/react": "19.2.2",
+    "typescript": "6.0.3"
   },
   "scripts": {
     "start": "expo start",
@@ -31,10 +32,12 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/domain.test.ts",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
     "verify": "npm run typecheck && npm test",
     "export:web": "expo export --platform web",
-    "prebuild:android": "expo prebuild --platform android --clean --no-install"
+    "prebuild:android": "expo prebuild --platform android --clean --no-install",
+    "assets": "node scripts/assets.cjs",
+    "postinstall": "node scripts/assets.cjs"
   },
   "private": true
 }

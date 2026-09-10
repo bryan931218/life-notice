@@ -1,63 +1,58 @@
 # 生活通知管家
 
-把學校通知、社區公告、活動資訊、繳費與取件訊息，整理成「要做什麼、什麼時候做、要準備什麼、誰負責」。
+把散落在截圖、群組訊息、學校公告、取件通知與帳單中的資訊，整理成「截止時間、準備清單、負責人與本機提醒」。
 
-## 目前完成的 MVP
+## v1.2 AI 自動通知版
 
-- 截圖匯入與本機 OCR：Android 使用 Google ML Kit 中文模型，iOS 使用 Apple Vision；通知內容不需傳到自建伺服器。
-- 貼上文字後整理標題、分類、明確日期時間與準備清單。
-- 對沒有年份、相對日期、多日期等高風險內容主動要求人工確認，不偷偷猜日期。
-- 本機通知提醒、提醒時間調整、測試提醒。
-- 原始通知保存、更正紀錄、重複通知防呆。
-- 家庭／室友負責人標記與文字分享。
-- 匯出 `.ics` 到行事曆。
-- JSON 文字備份、還原與本機資料刪除。
-- 無登入、無廣告追蹤、無自建後端。
+- **Android 自動通知監看**：使用者授權 Notification Access 後，直接取得 Messenger、LINE、Email 等顯示在通知欄的文字；不必再截圖。
+- **兩種辨識模式**：純本機規則模式，以及可選的 OpenAI AI 智慧辨識模式。
+- **AI 工具呼叫**：AI 只能從「建立行事曆事件、建立待辦、更新既有行程、要求確認、忽略通知」五種受限制工具中選擇，並以 strict schema 驗證參數。
+- **彈性語意理解**：AI 可理解改期、相對日期、上下文與自然語句，不受固定欄位/關鍵字流程限制。
+- **安全寫入 Calendar**：高信心且時間明確時才允許自動同步；有歧義時進待確認，不直接污染系統行事曆。
+- **BYOK 私人測試**：OpenAI API key 由使用者在 App 設定輸入並存在 SecureStore，不寫入 repo、APK 原始設定或備份。AI 預設關閉。
+- **AI 截圖模式**：手動選圖時，AI 可直接閱讀圖片；AI 關閉時仍保留裝置端 OCR。
+- **本機提醒與資料管理**：保留搜尋、完成、更正紀錄、準備清單、備份還原與 ICS 匯出。
 
-## Android 直接測試
+> iOS 不允許第三方 App 任意讀取其他 App 的通知，因此跨 App 自動監看僅支援 Android；iOS 保留分享/貼上/截圖入口。
 
-每次 `main` 更新後，GitHub Actions 會驗證 TypeScript 與測試、重新 prebuild Android、產生 APK，並發布成最新 GitHub Release。
-
-最新測試 APK：
-
-`https://github.com/bryan931218/translator/releases/latest/download/life-notice-preview.apk`
-
-Android 第一次側載時可能需要允許瀏覽器／檔案管理員「安裝未知應用程式」。測試 APK 使用測試簽章，只供內部測試；Google Play 正式上架會改用正式 upload key / Play App Signing。
-
-## 開發
+## 開發驗證
 
 ```bash
-npm ci
+npm install
 npm run verify
-npm start
-```
-
-Android 原生測試：
-
-```bash
-npm run prebuild:android
-npm run android
-```
-
-## 發行設定
-
-預設 identifier：`com.bryan931218.lifenotice`。正式發行時可用環境變數覆寫：
-
-- `APP_IDENTIFIER`
-- `SUPPORT_EMAIL`
-- `PRIVACY_URL`
-- `EAS_PROJECT_ID`
-
-`eas.json` 已包含 internal preview APK 與 production AAB 設定。Apple App Store / Google Play 正式簽章與提交需要開發者帳號持有人授權，請勿把憑證、密碼或私鑰提交到 Git。
-
-## 驗證
-
-```bash
-npm run typecheck
-npm test
 npm run export:web
 ```
 
-## 隱私
+## Android 測試 APK
 
-產品原則是「使用者主動選擇內容、本機處理、先確認再提醒」。完整測試版隱私文字見 `store/privacy-policy.md` 與 App 內設定頁。
+GitHub Actions 的 **Android test APK** workflow 會在 `main` 更新後自動建置。建置成功後，到該次 workflow run 的 **Artifacts** 下載 `life-notice-android-test`，解壓後即可取得 APK。
+
+目前測試 APK 使用測試簽章，適合側載測試，不可直接拿來當 Google Play 正式簽章版本。
+
+## 正式發行識別
+
+預設 Android package / iOS bundle identifier：
+
+`com.bryan931218.lifenotice`
+
+正式上架後不可隨意變更。若要換品牌識別，請在第一次公開上架前修改 `APP_IDENTIFIER`。
+
+## 原生模組
+
+`modules/notice-listener` 負責 Android Notification Listener 與 Calendar 寫入；`modules/notice-ocr` 是 Expo local OCR module：
+
+- Android：`com.google.mlkit:text-recognition-chinese`
+- iOS：Vision `VNRecognizeTextRequest`
+
+AI 關閉時不需要把私人通知內容送到 OpenAI。AI 開啟後，候選通知/使用者選取的截圖會依設定送至 OpenAI API；詳見隱私政策。
+
+## 發行文件
+
+- `docs/STORE_LISTING_zh-TW.md`：商店名稱、副標題、短/長描述與關鍵字。
+- `docs/PRIVACY_POLICY_zh-TW.md`：可發布的隱私權政策草稿。
+- `docs/RELEASE_CHECKLIST.md`：App Store / Google Play 上架前必做清單。
+- `docs/MONETIZATION_AND_GROWTH.md`：第一階段收費與宣傳策略。
+
+## 尚需帳戶本人完成的項目
+
+正式發布時，Apple / Google 的開發者合約、付款資料、身分驗證、憑證／Play App Signing 等只能由帳戶本人授權。不要把 Apple 密碼、Google 密碼、私鑰或 keystore 密碼提交到 GitHub。

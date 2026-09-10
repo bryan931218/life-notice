@@ -17,7 +17,23 @@ describe('更正與通知',()=>{
 });
 describe('備份與行事曆',()=>{
  it('匯入拒絕重複ID及惡意格式',()=>{assert.throws(()=>validateBackup({...EMPTY,notices:[n,n]}));assert.throws(()=>validateBackup({...EMPTY,notices:[{...n,dueAt:'oops'}]}))});
- it('備份中的未知負責人會安全改回我',()=>{const restored=validateBackup({...EMPTY,notices:[{...n,assignee:'陌生帳號'}]});assert.equal(restored.notices[0].assignee,'我')});
  it('匯入不使用外來附件路徑',()=>{assert.equal(validateBackup({...EMPTY,notices:[{...n,sourceImage:'file:///private/file'}]}).notices[0].sourceImage,undefined)});
+ it('匯入未知負責人會安全改回我',()=>{assert.equal(validateBackup({...EMPTY,members:['我'],notices:[{...n,assignee:'不存在的成員'}]}).notices[0].assignee,'我')});
  it('行事曆正確逸出換行，中文字折行不切斷字元',()=>{const s=toCalendar({...n,title:'測試,分號;\n換行',source:'中'.repeat(100)});assert.ok(s.includes('SUMMARY:測試\\,分號\\;\\n換行'));assert.ok(s.includes('DTSTART:20271001T020000Z'));for(const line of s.split('\r\n'))assert.ok(new TextEncoder().encode(line).length<=75)});
+});
+
+import {inferLiveNotification} from '../src/domain.ts';
+
+describe('即時通知自動整理',()=>{
+  it('可以把剛收到通知中的明天換成實際日期',()=>{
+    const r=inferLiveNotification('小明：明天下午7點記得來開會',new Date(2026,8,10,19,0).getTime());
+    assert.equal(r.date,'2026-09-11');
+    assert.equal(r.time,'19:00');
+    assert.equal(r.actionable,true);
+  });
+  it('驗證即時星期文字會排到下一個對應星期',()=>{
+    const r=inferLiveNotification('老師：星期一早上9點要交報告',new Date(2026,8,10,19,0).getTime());
+    assert.equal(r.date,'2026-09-14');
+    assert.equal(r.time,'09:00');
+  });
 });
