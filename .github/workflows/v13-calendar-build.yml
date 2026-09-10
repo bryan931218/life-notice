@@ -1,0 +1,102 @@
+name: Build Life Notice v1.3 Calendar APK
+
+on:
+  push:
+    branches: [v13-calendar-build]
+    paths:
+      - 'build/v13-ready.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-v13:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout source staging
+        uses: actions/checkout@v4
+
+      - name: Restore verified v1.2 base
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat staging/ai-v12-patch-part-* | base64 -d > /tmp/ai-v12-patch.tar.gz
+          echo "fbfae01307e5265f7877c162b43804dcc207abb5f289786c012b765bbb0edbf4  /tmp/ai-v12-patch.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/ai-v12-patch.tar.gz -C .
+          cp staging/notice-listener-AndroidManifest.xml modules/notice-listener/android/src/main/AndroidManifest.xml
+          cp staging/notice-listener-LifeNoticeListenerService.kt modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt
+          cp staging/notice-listener-NoticeListenerModule.kt modules/notice-listener/android/src/main/java/expo/modules/noticelistener/NoticeListenerModule.kt
+
+      - name: Apply verified v1.3 calendar overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat staging/v13-overlay-part-* | base64 -d > /tmp/v13-overlay.tar.gz
+          echo "387a66bb5f9509f453a3bcc9939e515b561fd8af86d6d76b9b8a6a18e47b32e2  /tmp/v13-overlay.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/v13-overlay.tar.gz -C .
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Ensure icon assets exist
+        shell: bash
+        run: |
+          test -f assets/icon.png
+          test -f assets/notification-icon.png
+          if [ ! -f assets/adaptive-icon.png ]; then cp assets/icon.png assets/adaptive-icon.png; fi
+
+      - name: Verify v1.3
+        run: npm run verify
+
+      - name: Generate Android native project
+        env:
+          CI: 1
+          NODE_ENV: production
+        run: npm run prebuild:android
+
+      - name: Build installable v1.3 APK
+        env:
+          NODE_ENV: production
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Prepare APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk life-notice-v13.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: life-notice-v13
+          path: life-notice-v13.apk
+          if-no-files-found: error
+
+      - name: Publish v1.3 preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v13-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v13.apk \
+            --target "$GITHUB_SHA" \
+            --title "生活通知管家 v1.3 月曆・安靜提醒測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.3 新增 App 內建月曆、每日行程檢視、首頁摘要與快速操作；預設只對重要通知主動提醒，一般聊天與低重要度內容不額外打擾。AI 功能仍可自由開關，API key 不內建於 APK。"
