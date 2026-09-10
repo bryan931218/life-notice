@@ -5,11 +5,14 @@ export const AI_MODELS = [
 ] as const;
 export type AiModel = typeof AI_MODELS[number][0];
 
+type Replyable={replySuggestions:string[]};
 export type AiDecision =
-  | {type:'create_calendar_event';title:string;startAt:string;endAt:string|null;allDay:boolean;location:string|null;reminderMinutes:number;category:Category;checklist:string[];importance:Importance;confidence:number;reason:string}
-  | {type:'create_task';title:string;dueAt:string|null;reminderMinutes:number|null;category:Category;checklist:string[];importance:Importance;confidence:number;reason:string}
-  | {type:'update_existing_event';eventId:string;title:string|null;startAt:string|null;endAt:string|null;location:string|null;reminderMinutes:number|null;importance:Importance;confidence:number;reason:string}
-  | {type:'ask_user';title:string;proposedAt:string|null;question:string;category:Category;importance:Importance;confidence:number;reason:string}
+  | ({type:'create_calendar_event';title:string;startAt:string;endAt:string|null;allDay:boolean;location:string|null;reminderMinutes:number;category:Category;checklist:string[];importance:Importance;confidence:number;reason:string}&Replyable)
+  | ({type:'create_task';title:string;dueAt:string|null;reminderMinutes:number|null;category:Category;checklist:string[];importance:Importance;confidence:number;reason:string}&Replyable)
+  | ({type:'update_existing_event';eventId:string;title:string|null;startAt:string|null;endAt:string|null;location:string|null;reminderMinutes:number|null;importance:Importance;confidence:number;reason:string}&Replyable)
+  | ({type:'cancel_existing_event';eventId:string;importance:Importance;confidence:number;reason:string}&Replyable)
+  | ({type:'complete_existing_task';eventId:string;confidence:number;reason:string}&Replyable)
+  | ({type:'ask_user';title:string;proposedAt:string|null;question:string;category:Category;importance:Importance;confidence:number;reason:string}&Replyable)
   | {type:'ignore_notification';confidence:number;reason:string};
 
 type AnalyzeArgs={
@@ -31,11 +34,11 @@ const common={
 const tools=[
   {
     type:'function',name:'create_calendar_event',strict:true,
-    description:'通知明確描述會在某個日期/時間發生的活動、會議、課程、比賽、預約、看診、出發、訂位等事件時使用。',
+    description:'通知或聊天明確描述某個時間會發生的活動、邀約、會議、課程、比賽、預約、看診、出發、訂位等事件。時間可以由 received_at 與「今晚、明天、星期三」等可靠相對時間推得。',
     parameters:{type:'object',additionalProperties:false,properties:{
       title:{type:'string',maxLength:100},
-      start_at:{type:'string',description:'ISO 8601 日期時間，必須根據通知內容與收到通知時間推得；不得猜測。'},
-      end_at:{type:['string','null'],description:'ISO 8601 結束時間；未知則 null。日期範圍事件可填。'},
+      start_at:{type:'string',description:'ISO 8601 日期時間。依原文與 received_at/device_timezone 推得；不可憑空猜。'},
+      end_at:{type:['string','null'],description:'ISO 8601 結束時間；未知則 null。'},
       all_day:{type:'boolean'},
       location:{type:['string','null'],maxLength:200},
       reminder_minutes:{type:'integer',minimum:0,maximum:10080},
@@ -47,10 +50,10 @@ const tools=[
   },
   {
     type:'function',name:'create_task',strict:true,
-    description:'通知描述使用者要完成、填寫、回覆、準備、購買、繳交、繳費、領取等待辦時使用。沒有期限也完全可以建立待辦：due_at 填 null，且不要為了缺少日期改用 ask_user。',
+    description:'通知描述使用者要完成、填寫、回覆、準備、購買、繳交、繳費、領取等待辦時使用。沒有期限完全可以建立 Todo。',
     parameters:{type:'object',additionalProperties:false,properties:{
       title:{type:'string',maxLength:100},
-      due_at:{type:['string','null'],description:'ISO 8601 截止時間；內容沒有明確期限就必須填 null，不要猜。null 代表無期限 Todo。'},
+      due_at:{type:['string','null'],description:'ISO 8601 截止時間；內容沒有明確期限就必須填 null。'},
       reminder_minutes:{type:['integer','null'],minimum:0,maximum:10080,description:'無期限 Todo 必須填 null。'},
       category:{type:'string',enum:categories},
       checklist:{type:'array',items:{type:'string',maxLength:160},maxItems:8},
@@ -60,54 +63,100 @@ const tools=[
   },
   {
     type:'function',name:'update_existing_event',strict:true,
-    description:'通知明確是在更正、延期、提前、取消或更新既有行程時使用。event_id 必須來自提供的既有行程，不得自行捏造。',
+    description:'新通知明確是在更正、延期、提前、換地點或更新既有行程/待辦時使用。event_id 必須來自 existing_upcoming_events。',
     parameters:{type:'object',additionalProperties:false,properties:{
       event_id:{type:'string'},title:{type:['string','null'],maxLength:100},start_at:{type:['string','null']},end_at:{type:['string','null']},location:{type:['string','null'],maxLength:200},reminder_minutes:{type:['integer','null'],minimum:0,maximum:10080},importance:importanceProperty,...common,
     },required:['event_id','title','start_at','end_at','location','reminder_minutes','importance','confidence','reason']}
   },
   {
+    type:'function',name:'cancel_existing_event',strict:true,
+    description:'通知明確表示 existing_upcoming_events 中某個行程已取消、不用去、不舉行時使用。不要另外建立一個「取消」行程。',
+    parameters:{type:'object',additionalProperties:false,properties:{event_id:{type:'string'},importance:importanceProperty,...common},required:['event_id','importance','confidence','reason']}
+  },
+  {
+    type:'function',name:'complete_existing_task',strict:true,
+    description:'通知明確證明 existing_upcoming_events 中某個待辦已完成，例如已繳費、已提交、已領取。只有有清楚對應時使用。',
+    parameters:{type:'object',additionalProperties:false,properties:{event_id:{type:'string'},...common},required:['event_id','confidence','reason']}
+  },
+  {
     type:'function',name:'ask_user',strict:true,
-    description:'只有在「到底要做什麼／是不是行程」本身有歧義，或訊息明確提到日期時間但無法安全判斷時使用。單純沒有期限不是歧義，應建立 due_at=null 的 create_task。',
+    description:'只有在存在兩個以上合理解讀，而且錯選會造成錯誤行程時才使用。不要為了確認已經能從 received_at 推得的今天/今晚/明天日期而詢問。也不要因為邀請尚未回覆就詢問日期。',
     parameters:{type:'object',additionalProperties:false,properties:{
       title:{type:'string',maxLength:100},proposed_at:{type:['string','null']},question:{type:'string',maxLength:220},category:{type:'string',enum:categories},importance:importanceProperty,...common,
     },required:['title','proposed_at','question','category','importance','confidence','reason']}
   },
   {
     type:'function',name:'ignore_notification',strict:true,
-    description:'一般聊天、廣告、社群互動、新聞、驗證碼、純狀態通知或不需要建立提醒/行程/待辦時使用。',
+    description:'一般聊天、貼圖、廣告、社群互動、新聞、驗證碼、純狀態通知或不需要建立提醒/行程/待辦時使用。',
     parameters:{type:'object',additionalProperties:false,properties:{...common},required:['confidence','reason']}
+  },
+  {
+    type:'function',name:'suggest_replies',strict:true,
+    description:'輔助工具。當來源是聊天/訊息，而且對方正在詢問、邀約或需要回覆時，可在主要動作之外額外呼叫一次，產生 1 到 3 個自然、簡短的繁體中文回覆。App 只顯示按鈕，絕不自動送出。',
+    parameters:{type:'object',additionalProperties:false,properties:{replies:{type:'array',minItems:1,maxItems:3,items:{type:'string',minLength:1,maxLength:40}}},required:['replies']}
   }
 ] as const;
 
 function validIso(value:unknown):value is string{return typeof value==='string'&&Number.isFinite(Date.parse(value));}
 function category(v:unknown):Category{return categories.includes(String(v))?String(v) as Category:'生活';}
 function cleanChecklist(v:unknown){return Array.isArray(v)?v.filter(x=>typeof x==='string').map(x=>x.trim()).filter(Boolean).slice(0,8):[];}
+function cleanReplies(v:unknown){return Array.isArray(v)?[...new Set(v.filter(x=>typeof x==='string').map(x=>x.trim()).filter(Boolean).map(x=>x.slice(0,40)))].slice(0,3):[];}
 function confidence(v:unknown){const n=Number(v);return Number.isFinite(n)?Math.max(0,Math.min(1,n)):0;}
 function importance(v:unknown):Importance{return v==='urgent'?'urgent':v==='important'?'important':'normal';}
 
 export function parseAiToolCall(call:{name?:unknown;arguments?:unknown}, existingIds=new Set<string>()):AiDecision{
   if(typeof call.name!=='string'||typeof call.arguments!=='string')throw new Error('AI 沒有回傳可執行的工具。');
   let a:any;try{a=JSON.parse(call.arguments)}catch{throw new Error('AI 工具參數格式錯誤。')}
-  const reason=String(a.reason??'').slice(0,240), conf=confidence(a.confidence);
+  const reason=String(a.reason??'').slice(0,240), conf=confidence(a.confidence),replySuggestions:string[]=[];
   if(call.name==='ignore_notification')return {type:'ignore_notification',confidence:conf,reason};
   if(call.name==='create_calendar_event'){
     if(!validIso(a.start_at))throw new Error('AI 沒有提供有效的行程時間。');
-    return {type:'create_calendar_event',title:String(a.title??'').trim().slice(0,100)||'未命名行程',startAt:new Date(a.start_at).toISOString(),endAt:validIso(a.end_at)?new Date(a.end_at).toISOString():null,allDay:!!a.all_day,location:typeof a.location==='string'&&a.location.trim()?a.location.trim().slice(0,200):null,reminderMinutes:Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)),category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason};
+    return {type:'create_calendar_event',title:String(a.title??'').trim().slice(0,100)||'未命名行程',startAt:new Date(a.start_at).toISOString(),endAt:validIso(a.end_at)?new Date(a.end_at).toISOString():null,allDay:!!a.all_day,location:typeof a.location==='string'&&a.location.trim()?a.location.trim().slice(0,200):null,reminderMinutes:Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)),category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason,replySuggestions};
   }
   if(call.name==='create_task'){
     const dueAt=validIso(a.due_at)?new Date(a.due_at).toISOString():null;
-    return {type:'create_task',title:String(a.title??'').trim().slice(0,100)||'未命名待辦',dueAt,reminderMinutes:dueAt&&a.reminder_minutes!==null?Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)):null,category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason};
+    return {type:'create_task',title:String(a.title??'').trim().slice(0,100)||'未命名待辦',dueAt,reminderMinutes:dueAt&&a.reminder_minutes!==null?Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)):null,category:category(a.category),checklist:cleanChecklist(a.checklist),importance:importance(a.importance),confidence:conf,reason,replySuggestions};
   }
-  if(call.name==='ask_user')return {type:'ask_user',title:String(a.title??'').trim().slice(0,100)||'需要確認的通知',proposedAt:validIso(a.proposed_at)?new Date(a.proposed_at).toISOString():null,question:String(a.question??'請確認這則通知。').slice(0,220),category:category(a.category),importance:importance(a.importance),confidence:conf,reason};
+  if(call.name==='ask_user')return {type:'ask_user',title:String(a.title??'').trim().slice(0,100)||'需要確認的通知',proposedAt:validIso(a.proposed_at)?new Date(a.proposed_at).toISOString():null,question:String(a.question??'請確認這則通知。').slice(0,220),category:category(a.category),importance:importance(a.importance),confidence:conf,reason,replySuggestions};
   if(call.name==='update_existing_event'){
     const eventId=String(a.event_id??'');if(!existingIds.has(eventId))throw new Error('AI 指定了不存在的既有行程。');
-    return {type:'update_existing_event',eventId,title:typeof a.title==='string'&&a.title.trim()?a.title.trim().slice(0,100):null,startAt:validIso(a.start_at)?new Date(a.start_at).toISOString():null,endAt:validIso(a.end_at)?new Date(a.end_at).toISOString():null,location:typeof a.location==='string'&&a.location.trim()?a.location.trim().slice(0,200):null,reminderMinutes:a.reminder_minutes===null?null:Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)),importance:importance(a.importance),confidence:conf,reason};
+    return {type:'update_existing_event',eventId,title:typeof a.title==='string'&&a.title.trim()?a.title.trim().slice(0,100):null,startAt:validIso(a.start_at)?new Date(a.start_at).toISOString():null,endAt:validIso(a.end_at)?new Date(a.end_at).toISOString():null,location:typeof a.location==='string'&&a.location.trim()?a.location.trim().slice(0,200):null,reminderMinutes:a.reminder_minutes===null?null:Math.max(0,Math.min(10080,Number(a.reminder_minutes)||0)),importance:importance(a.importance),confidence:conf,reason,replySuggestions};
+  }
+  if(call.name==='cancel_existing_event'){
+    const eventId=String(a.event_id??'');if(!existingIds.has(eventId))throw new Error('AI 指定了不存在的既有行程。');
+    return {type:'cancel_existing_event',eventId,importance:importance(a.importance),confidence:conf,reason,replySuggestions};
+  }
+  if(call.name==='complete_existing_task'){
+    const eventId=String(a.event_id??'');if(!existingIds.has(eventId))throw new Error('AI 指定了不存在的既有待辦。');
+    return {type:'complete_existing_task',eventId,confidence:conf,reason,replySuggestions};
   }
   throw new Error(`AI 回傳未知工具：${call.name}`);
 }
 
+export function parseAiToolCalls(calls:{name?:unknown;arguments?:unknown}[],existingIds=new Set<string>()):AiDecision{
+  const primaries=calls.filter(c=>c.name!=='suggest_replies');
+  if(primaries.length!==1)throw new Error('AI 沒有選出唯一的主要處理動作。');
+  const primary=parseAiToolCall(primaries[0],existingIds);
+  if(primary.type==='ignore_notification')return primary;
+  const replyCall=calls.find(c=>c.name==='suggest_replies');
+  if(!replyCall||typeof replyCall.arguments!=='string')return primary;
+  let parsed:any;try{parsed=JSON.parse(replyCall.arguments)}catch{return primary}
+  return {...primary,replySuggestions:cleanReplies(parsed.replies)};
+}
+
+function promoteNeedlessConfirmation(decision:AiDecision,text:string,receivedAt:number):AiDecision{
+  if(decision.type!=='ask_user'||!decision.proposedAt)return decision;
+  const at=Date.parse(decision.proposedAt);
+  if(!Number.isFinite(at)||at<receivedAt-15*60*1000||at>receivedAt+36*60*60*1000)return decision;
+  const cueCount=(text.match(/今天|今晚|明天|明晚|後天|大後天|上午|早上|中午|下午|晚上|晚間|凌晨/g)??[]).length;
+  const appointment=/開會|會議|上課|考試|面試|吃飯|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|咖啡|電影|打球|練球|集合|看診|回診|預約|訂位/.test(text);
+  if(cueCount>2||!appointment)return decision;
+  const title=/開會|會議/.test(text)?'開會':/早餐/.test(text)?'吃早餐':/午餐/.test(text)?'吃午餐':/晚餐/.test(text)?'吃晚餐':/吃飯|聚餐/.test(text)?'吃飯':/見面|碰面/.test(text)?'見面':/打球|練球/.test(text)?'打球':decision.title.replace(/^確認\s*/,'').replace(/日期|時間/g,'').trim()||'行程';
+  return {type:'create_calendar_event',title,startAt:new Date(at).toISOString(),endAt:null,allDay:false,location:null,reminderMinutes:60,category:'活動',checklist:[],importance:decision.importance,confidence:Math.max(0.86,decision.confidence),reason:'時間可由訊息內容與收到通知的時間安全推得，不需要再次確認。',replySuggestions:decision.replySuggestions};
+}
+
 async function requestDecision(apiKey:string, model:AiModel, input:any, existing:Notice[]):Promise<AiDecision>{
-  const recent=existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null}));
+  const recent=existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null,is_todo:!n.dueAt}));
   const response=await fetch('https://api.openai.com/v1/responses',{
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},
@@ -115,31 +164,31 @@ async function requestDecision(apiKey:string, model:AiModel, input:any, existing
       model,
       store:false,
       reasoning:{effort:'low'},
-      max_output_tokens:700,
-      parallel_tool_calls:false,
+      max_output_tokens:900,
+      parallel_tool_calls:true,
       tool_choice:'required',
       tools,
-      instructions:'你是生活通知管家的行程與待辦判斷器。閱讀單一手機通知或截圖後，必須只選一個工具。重點是理解語意，不要只靠關鍵字。相對日期必須以提供的 received_at 與 device_timezone 換算。沒有足夠證據時絕對不要猜日期、時間、地點或人物。明確有日期/時間發生的活動用 create_calendar_event；明確要完成的動作用 create_task。特別重要：如果任務本身很明確、只是沒有任何期限，直接用 create_task 並將 due_at 與 reminder_minutes 設為 null，這是正常的無期限 Todo，不要 ask_user 問時間。只有意圖本身有歧義，或原文確實提到時間但無法安全判定時才 ask_user。預設要非常安靜：一般聊天、貼圖、社群互動、廣告、促銷、新聞、Samsung Rewards/點數、電池/省電模式、裝置狀態、下載完成、同步狀態、驗證碼，只要使用者沒有明確要參加/完成/付款/領取/回覆的行動，就用 ignore_notification。取消、改期、臨近期限等可標 urgent，需要主動注意的截止/預約/課程/會議標 important，無期限待辦通常標 normal。若內容是既有活動的延期/更正，且 existing_upcoming_events 有明確對應，使用 update_existing_event。標題要短、自然、可以直接顯示在行程或 Todo 清單。',
+      instructions:'你是生活通知管家的通知助理。每次分析必須呼叫剛好一個主要動作工具：create_calendar_event、create_task、update_existing_event、cancel_existing_event、complete_existing_task、ask_user、ignore_notification 其中之一。如果來源是聊天且值得回覆，可以另外再呼叫 suggest_replies 一次；suggest_replies 永遠只是建議，App 不會自動送出。\n\n時間推理規則：received_at 與 device_timezone 是可靠基準。相對日期必須換算。若訊息在某天凌晨 02:47 收到並說「晚上10.開會」，22:00 尚未發生，直接建立同一天 22:00 的行程，不要問「是不是今天」。同理「今晚、今天下午、今天早上」若時刻仍在未來，直接使用 received_at 的當天。「明天十點」就是隔天 10:00。「10.要吃飯嗎」中的 10. 在日期/邀約語境可理解為 10 點。只有時刻已經明顯過去、同一句有兩個互相衝突日期、或真的存在兩個合理日期時才 ask_user。\n\n語意規則：聊天中的邀約問題（例如「明天十點吃早餐嗎？」）只要日期時間明確，就是可加入的行程，不要因為對方用了問句就 ask_user；可以同時 suggest_replies。沒有期限但動作明確的事情用 create_task 且 due_at=null。取消既有事件用 cancel_existing_event，不要建立新的「取消」行程；完成通知用 complete_existing_task。更改時間/地點用 update_existing_event。一般聊天、貼圖、廣告、社群互動、新聞、驗證碼、系統狀態等用 ignore_notification。標題應短且像真正的行事曆標題，例如「開會」「和小陳吃早餐」，不要寫「確認開會日期」「收到通知」這種描述處理流程的標題。只有錯誤建立風險真的高時才 ask_user。',
       input,
     })
   });
   const json:any=await response.json().catch(()=>({}));
   if(!response.ok){const msg=json?.error?.message||`HTTP ${response.status}`;throw new Error(`OpenAI API 失敗：${msg}`)}
   const calls=(Array.isArray(json.output)?json.output:[]).filter((x:any)=>x?.type==='function_call');
-  if(calls.length!==1)throw new Error('AI 沒有選出唯一的處理動作。');
-  return parseAiToolCall(calls[0],new Set(recent.map(x=>x.id)));
+  return parseAiToolCalls(calls,new Set(recent.map(x=>x.id)));
 }
 
 export async function analyzeNotificationWithAI(args:AnalyzeArgs):Promise<AiDecision>{
   const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Taipei';
-  const recent=args.existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null}));
+  const recent=args.existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null,is_todo:!n.dueAt}));
   const payload={source_app:args.appName,notification_title:args.title,notification_text:args.text,received_at:new Date(args.receivedAt).toISOString(),device_timezone:timezone,existing_upcoming_events:recent};
-  return requestDecision(args.apiKey,args.model,`請分析以下手機通知 JSON：\n${JSON.stringify(payload)}`,args.existing);
+  const decision=await requestDecision(args.apiKey,args.model,`請分析以下手機通知 JSON：\n${JSON.stringify(payload)}`,args.existing);
+  return promoteNeedlessConfirmation(decision,args.text,args.receivedAt);
 }
 
 export async function analyzeScreenshotWithAI(args:{apiKey:string;model:AiModel;base64:string;mimeType:string;receivedAt:number;existing:Notice[]}):Promise<AiDecision>{
   const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Taipei';
-  const recent=args.existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null}));
+  const recent=args.existing.filter(n=>!n.done).slice(0,30).map(n=>({id:n.id,title:n.title,start_at:n.dueAt,end_at:n.endAt??null,location:n.location??null,is_todo:!n.dueAt}));
   const context=`這是一張由使用者手動選取的通知/聊天截圖。請直接閱讀圖片，不要依賴 OCR。received_at=${new Date(args.receivedAt).toISOString()}，device_timezone=${timezone}。既有行程 JSON=${JSON.stringify(recent)}`;
   const input=[{role:'user',content:[{type:'input_text',text:context},{type:'input_image',image_url:`data:${args.mimeType};base64,${args.base64}`,detail:'high'}]}];
   return requestDecision(args.apiKey,args.model,input,args.existing);
