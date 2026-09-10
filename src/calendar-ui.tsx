@@ -15,7 +15,7 @@ export function MonthCalendar({notices,onOpen,onAdd}:{notices:Notice[];onOpen:(i
   const [selected,setSelected]=useState(()=>dayKey(now));
   const cells=useMemo(()=>monthGrid(month),[month]);
   const dayItems=useMemo(()=>noticesForDay(notices,selected),[notices,selected]);
-  const undated=notices.filter(n=>!n.done&&!n.dueAt);
+  const undated=notices.filter(n=>!n.done&&!n.dueAt&&!!n.needsReview);
   const goToday=()=>{const d=new Date();setMonth(new Date(d.getFullYear(),d.getMonth(),1));setSelected(dayKey(d))};
 
   return <>
@@ -43,7 +43,7 @@ export function MonthCalendar({notices,onOpen,onAdd}:{notices:Notice[];onOpen:(i
       <View style={[c.stripe,{backgroundColor:catColor[n.category]}]}/><View style={c.time}><Text style={c.timeText}>{timeLabel(n)}</Text></View><View style={c.eventBody}><Text numberOfLines={2} style={c.eventTitle}>{n.title}</Text>{n.location?<Text numberOfLines={1} style={c.meta}>{n.location}</Text>:null}</View>{n.needsReview?<View style={c.review}><Text style={c.reviewText}>待確認</Text></View>:<Icon name="chevron-forward" size={17} color={p.muted}/>} 
     </Pressable>)}
     {!dayItems.length&&<View style={c.empty}><Text style={c.emptyText}>這天沒有行程</Text></View>}
-    {undated.length>0&&<><Text style={c.secondary}>待確認</Text>{undated.slice(0,4).map(n=><Pressable key={n.id} style={c.undated} onPress={()=>onOpen(n.id)}><Icon name="time-outline"/><View style={{flex:1}}><Text style={c.undatedTitle}>{n.title}</Text><Text style={c.meta}>補上時間後會出現在月曆</Text></View><Icon name="chevron-forward" size={17} color={p.muted}/></Pressable>)}</>}
+    {undated.length>0&&<><Text style={c.secondary}>待確認</Text>{undated.slice(0,4).map(n=><Pressable key={n.id} style={c.undated} onPress={()=>onOpen(n.id)}><Icon name="help-circle-outline"/><View style={{flex:1}}><Text style={c.undatedTitle}>{n.title}</Text><Text style={c.meta}>內容有歧義，點開確認</Text></View><Icon name="chevron-forward" size={17} color={p.muted}/></Pressable>)}</>}
   </>;
 }
 
