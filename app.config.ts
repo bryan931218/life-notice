@@ -7,7 +7,7 @@ const privacyUrl = process.env.PRIVACY_URL || '';
 const config: ExpoConfig = {
   name: '生活通知管家',
   slug: 'life-notice',
-  version: '1.3.0',
+  version: '1.4.0',
   orientation: 'default',
   userInterfaceStyle: 'light',
   scheme: 'lifenotice',
@@ -15,7 +15,7 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: appId,
-    buildNumber: '4',
+    buildNumber: '5',
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
       CFBundleLocalizations: ['zh-Hant', 'en'],
@@ -29,7 +29,7 @@ const config: ExpoConfig = {
   android: {
     package: appId,
     permissions: ['android.permission.READ_CALENDAR', 'android.permission.WRITE_CALENDAR'],
-    versionCode: 4,
+    versionCode: 5,
     allowBackup: false,
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
@@ -50,7 +50,7 @@ const config: ExpoConfig = {
     [
       'expo-image-picker',
       {
-        photosPermission: '選擇你想整理的通知截圖，供本機辨識與保存原文。',
+        photosPermission: '選擇要整理的通知截圖。',
         cameraPermission: false,
         microphonePermission: false,
       },
