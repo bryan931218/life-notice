@@ -15,5 +15,20 @@
         android:name="android.service.notification.disabled_filter_types"
         android:value="ongoing|silent" />
     </service>
+
+    <service
+      android:name="expo.modules.noticelistener.LifeNoticeCaptureTileService"
+      android:label="擷取行程"
+      android:exported="true"
+      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+      </intent-filter>
+      <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="true" />
+    </service>
+
+    <receiver
+      android:name="expo.modules.noticelistener.QuickCaptureReceiver"
+      android:exported="false" />
   </application>
 </manifest>
