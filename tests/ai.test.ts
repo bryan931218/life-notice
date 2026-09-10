@@ -18,6 +18,18 @@ describe('AI 工具呼叫安全檢查',()=>{
     }
   });
 
+  it('沒有期限的任務會建立成 Todo 而不是要求補時間',()=>{
+    const d=parseAiToolCall({name:'create_task',arguments:JSON.stringify({
+      title:'填寫畢業表單',due_at:null,reminder_minutes:60,category:'學校',checklist:[],importance:'normal',confidence:0.95,reason:'有明確待辦，但沒有期限'
+    })});
+    assert.equal(d.type,'create_task');
+    if(d.type==='create_task'){
+      assert.equal(d.dueAt,null);
+      assert.equal(d.reminderMinutes,null);
+      assert.equal(d.title,'填寫畢業表單');
+    }
+  });
+
   it('一般聊天可以明確略過',()=>{
     const d=parseAiToolCall({name:'ignore_notification',arguments:JSON.stringify({confidence:0.99,reason:'一般聊天，沒有待辦或行程'})});
     assert.deepEqual(d,{type:'ignore_notification',confidence:0.99,reason:'一般聊天，沒有待辦或行程'});
