@@ -1,0 +1,97 @@
+name: Build Life Notice v1.3 APK
+
+on:
+  push:
+    branches: [v13-build]
+    paths:
+      - 'build/v13-ready.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  build-v13:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout v1.3 build branch
+        uses: actions/checkout@v4
+
+      - name: Restore verified v1.2 base and v1.3 overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat staging/ai-v12-patch-part-* | base64 -d > /tmp/ai-v12-patch.tar.gz
+          echo "fbfae01307e5265f7877c162b43804dcc207abb5f289786c012b765bbb0edbf4  /tmp/ai-v12-patch.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/ai-v12-patch.tar.gz -C .
+          cp staging/notice-listener-AndroidManifest.xml modules/notice-listener/android/src/main/AndroidManifest.xml
+
+          cat staging/v13-safe-* | base64 -d > /tmp/v13-overlay.tar.gz
+          echo "387a66bb5f9509f453a3bcc9939e515b561fd8af86d6d76b9b8a6a18e47b32e2  /tmp/v13-overlay.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/v13-overlay.tar.gz -C .
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Ensure generated icon assets exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f assets/icon.png
+          test -f assets/notification-icon.png
+          if [ ! -f assets/adaptive-icon.png ]; then cp assets/icon.png assets/adaptive-icon.png; fi
+
+      - name: Verify app
+        run: npm run verify
+
+      - name: Generate Android native project
+        env:
+          CI: 1
+          NODE_ENV: production
+        run: npm run prebuild:android
+
+      - name: Build installable APK
+        env:
+          NODE_ENV: production
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Prepare APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk life-notice-v13.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: life-notice-v13
+          path: life-notice-v13.apk
+          if-no-files-found: error
+
+      - name: Publish preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v13-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v13.apk \
+            --target "$GITHUB_SHA" \
+            --title "生活通知管家 v1.3 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.3：新增內建月曆、預設『重要才提醒』降噪模式、精緻化首頁與 AI 設定。AI 預設關閉，API key 不內建於 APK。Android 通知存取需由使用者在系統設定中明確授權。"
