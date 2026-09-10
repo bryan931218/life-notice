@@ -44,12 +44,28 @@ internal object DetectedStore {
   private const val AI_MODE = "ai_enabled"
   private const val ALERT_LEVEL = "alert_level"
   private const val MAX = 120
+  private const val CONTEXT_WINDOW = 15L * 60L * 1000L
+  private val AGE_PREFIX = Regex("^\\[\\d+ 秒前]\\s*")
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
+  private fun normalizedContext(text: String): String = text
+    .lineSequence()
+    .map { it.trim().replace(AGE_PREFIX, "") }
+    .filter { it.isNotBlank() }
+    .joinToString("\n")
+
+  private fun normalizedLines(text: String): Set<String> = normalizedContext(text)
+    .lineSequence()
+    .map { it.trim().lowercase() }
+    .filter { it.length >= 2 }
+    .toSet()
+
   fun idFor(packageName: String, title: String, text: String, receivedAt: Long): String {
     val day = receivedAt / 86_400_000L
-    val raw = "$packageName|$title|$text|$day"
+    // The context formatter adds changing "N 秒前" labels. Remove them so an Android
+    // notification update containing the same conversation snapshot keeps the same id.
+    val raw = "$packageName|${title.trim().lowercase()}|${normalizedContext(text)}|$day"
     val bytes = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
     return bytes.take(12).joinToString("") { "%02x".format(it) }
   }
@@ -58,6 +74,20 @@ internal object DetectedStore {
   fun add(context: Context, item: DetectedNotice): Boolean {
     val current = get(context).toMutableList()
     if (current.any { it.id == item.id }) return false
+
+    // Messenger/LINE often replace one notification with a newer cumulative snapshot.
+    // If the new snapshot is from the same conversation, arrives within the context
+    // window, and shares at least one actual message line, discard the older pending
+    // snapshot. AI will then see only the newest, most complete context instead of
+    // creating the same event once per notification update.
+    val incomingLines = normalizedLines(item.text)
+    current.removeAll { old ->
+      if (old.packageName != item.packageName || old.title.trim() != item.title.trim()) return@removeAll false
+      if (kotlin.math.abs(item.receivedAt - old.receivedAt) > CONTEXT_WINDOW) return@removeAll false
+      val oldLines = normalizedLines(old.text)
+      oldLines.isNotEmpty() && incomingLines.isNotEmpty() && oldLines.any { it in incomingLines }
+    }
+
     current.add(0, item)
     save(context, current.take(MAX))
     return true
