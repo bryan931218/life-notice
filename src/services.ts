@@ -16,6 +16,10 @@ const LUNA:AiModel='gpt-5.6-luna';
 export type AiSettings={enabled:boolean;model:AiModel};
 export type AlertLevel='important'|'balanced'|'all';
 const DEFAULT_AI:AiSettings={enabled:false,model:LUNA};
+const AUTO_SOURCE=/^\[(?:AI)?自動偵測｜/;
+const OBVIOUS_NOISE=/Samsung\s*Rewards|Rewards|獲得\s*\d+\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|驗證碼|認證碼|一次性密碼|\bOTP\b|verification\s*code|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞|推薦文章|每日精選|購物優惠|會員好康|#請益|數位城市迷彩/i;
+
+export function isObviousNoiseText(text:string){return OBVIOUS_NOISE.test(text);}
 
 export type DetectedNotification={id:string;packageName:string;appName:string;title:string;text:string;receivedAt:number;score:number;reason:string};
 const listener=Platform.OS==='android'?requireOptionalNativeModule<{isEnabled():boolean;openSettings():void;requestQuickTile():boolean;getDetected():DetectedNotification[];markProcessed(ids:string[]):void;clearDetected():void;setAiMode(enabled:boolean):void;setAlertLevel(level:string):void;addCalendarEvent(title:string,startAt:number,endAt:number,allDay:boolean,description:string,location:string,syncKey:string):string}>('NoticeListener'):null;
@@ -23,7 +27,12 @@ export function notificationListenerSupported(){return Platform.OS==='android'&&
 export function notificationListenerEnabled(){return !!listener?.isEnabled();}
 export function openNotificationListenerSettings(){if(!listener)throw new Error(Platform.OS==='ios'?'iPhone 無法讀取其他 App 的通知；請改用分享或截圖匯入。':'此版本尚未包含通知自動讀取模組。');listener.openSettings();}
 export function requestQuickCaptureTile(){if(!listener)throw new Error('快速擷取只支援 Android 原生版。');return listener.requestQuickTile();}
-export function getDetectedNotifications():DetectedNotification[]{return listener?.getDetected()??[];}
+export function getDetectedNotifications():DetectedNotification[]{
+  const all=listener?.getDetected()??[];
+  const ignored=all.filter(x=>isObviousNoiseText(`${x.appName}\n${x.title}\n${x.text}`));
+  if(ignored.length)listener?.markProcessed(ignored.map(x=>x.id));
+  return all.filter(x=>!isObviousNoiseText(`${x.appName}\n${x.title}\n${x.text}`));
+}
 export function markDetectedNotificationsProcessed(ids:string[]){listener?.markProcessed(ids);}
 export function clearDetectedNotifications(){listener?.clearDetected();}
 
@@ -32,7 +41,6 @@ export async function getAiSettings():Promise<AiSettings>{
   if(raw){try{enabled=!!JSON.parse(raw).enabled}catch{}}
   const fixed={enabled,model:LUNA} as AiSettings;
   listener?.setAiMode(enabled);listener?.setAlertLevel('important');
-  // Migrate older model/sensitivity choices to v1.4's simple defaults.
   await AsyncStorage.setItem(AI_SETTINGS_KEY,JSON.stringify(fixed));
   await AsyncStorage.setItem(ALERT_LEVEL_KEY,'important');
   return fixed;
@@ -40,7 +48,15 @@ export async function getAiSettings():Promise<AiSettings>{
 export async function setAiSettings(settings:AiSettings){const fixed:AiSettings={enabled:settings.enabled,model:LUNA};await AsyncStorage.setItem(AI_SETTINGS_KEY,JSON.stringify(fixed));listener?.setAiMode(fixed.enabled);listener?.setAlertLevel('important');}
 export async function getAlertLevel():Promise<AlertLevel>{await AsyncStorage.setItem(ALERT_LEVEL_KEY,'important');listener?.setAlertLevel('important');return 'important';}
 export async function setAlertLevel(_level:AlertLevel){await AsyncStorage.setItem(ALERT_LEVEL_KEY,'important');listener?.setAlertLevel('important');return 'important' as const;}
-export async function saveOpenAiKey(key:string){const value=key.trim();if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(value))throw new Error('API key 格式看起來不正確。');if(Platform.OS==='web')throw new Error('網頁預覽不保存 API key，請使用手機 App。');await SecureStore.setItemAsync(OPENAI_KEY_KEY,value);}
+function checkedOpenAiKey(key:string){const value=key.trim();if(!/^sk-[A-Za-z0-9_-]{20,}$/.test(value))throw new Error('API key 格式看起來不正確。');return value;}
+export async function verifyOpenAiKey(key:string){
+  const value=checkedOpenAiKey(key);
+  if(Platform.OS==='web')throw new Error('網頁預覽不保存 API key，請使用手機 App。');
+  const response=await fetch('https://api.openai.com/v1/models/gpt-5.6-luna',{headers:{Authorization:`Bearer ${value}`}});
+  if(!response.ok){const json:any=await response.json().catch(()=>({}));throw new Error(`AI 連線失敗：${json?.error?.message||`HTTP ${response.status}`}`)}
+  return true;
+}
+export async function saveOpenAiKey(key:string){const value=checkedOpenAiKey(key);await verifyOpenAiKey(value);await SecureStore.setItemAsync(OPENAI_KEY_KEY,value);}
 export async function getOpenAiKey(){if(Platform.OS==='web')return null;return SecureStore.getItemAsync(OPENAI_KEY_KEY);}
 export async function hasOpenAiKey(){return !!(await getOpenAiKey());}
 export async function clearOpenAiKey(){if(Platform.OS!=='web')await SecureStore.deleteItemAsync(OPENAI_KEY_KEY);const settings=await getAiSettings();await setAiSettings({...settings,enabled:false});}
@@ -63,9 +79,24 @@ export async function addToSystemCalendar(n:Notice,syncKey='manual'){
   const start=Date.parse(n.dueAt);const end=n.endAt&&Date.parse(n.endAt)>start?Date.parse(n.endAt):start+30*60000;
   return listener.addCalendarEvent(n.title,start,end,!!n.allDay,n.source,n.location??'',syncKey);
 }
-export async function load():Promise<State>{const raw=await AsyncStorage.getItem(KEY);if(!raw)return {...EMPTY,members:[...EMPTY.members],notices:[]};const saved=JSON.parse(raw);const validated=validateBackup(saved);return {...validated,welcomed:!!saved.welcomed,notices:validated.notices.map((n,i)=>({...n,sourceImage:typeof saved.notices[i].sourceImage==='string' && FS.documentDirectory && saved.notices[i].sourceImage.startsWith(FS.documentDirectory)?saved.notices[i].sourceImage:undefined}))};}
+export async function load():Promise<State>{
+  const raw=await AsyncStorage.getItem(KEY);if(!raw)return {...EMPTY,members:[...EMPTY.members],notices:[]};
+  const saved=JSON.parse(raw);const validated=validateBackup(saved);
+  const restored=validated.notices.map((n,i)=>({...n,sourceImage:typeof saved.notices[i]?.sourceImage==='string' && FS.documentDirectory && saved.notices[i].sourceImage.startsWith(FS.documentDirectory)?saved.notices[i].sourceImage:undefined}));
+  const seen=new Set<string>();
+  const notices=restored.filter(n=>{
+    if(!AUTO_SOURCE.test(n.source))return true;
+    if(isObviousNoiseText(`${n.title}\n${n.source}`))return false;
+    const normalized=n.source.replace(/\n?\[偵測ID:[^\]]+\]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+    const fingerprint=`${n.title.trim().toLowerCase()}|${n.dueAt??''}|${normalized}`;
+    if(seen.has(fingerprint))return false;seen.add(fingerprint);return true;
+  });
+  const result={...validated,welcomed:!!saved.welcomed,notices};
+  if(notices.length!==restored.length)await AsyncStorage.setItem(KEY,JSON.stringify(result));
+  return result;
+}
 export async function persist(s:State){await AsyncStorage.setItem(KEY,JSON.stringify(s));}
-export async function recognize(uri:string):Promise<string>{const ocr=requireOptionalNativeModule<{recognize(uri:string):Promise<string>}>('NoticeOcr');if(!ocr)throw new Error('截圖辨識需要安裝原生測試版。此預覽可先貼上文字。');return ocr.recognize(uri);}
+export async function recognize(uri:string):Promise<string>{const ocr=requireOptionalNativeModule<{recognize(uri:string):Promise<string>}>('NoticeOcr');if(!ocr)throw new Error('此安裝包缺少截圖辨識模組，請更新到最新版 APK。');return ocr.recognize(uri);}
 export async function keepImage(uri:string):Promise<string>{if(Platform.OS==='web')return uri;const folder=FS.documentDirectory+'sources/';await FS.makeDirectoryAsync(folder,{intermediates:true});const dest=folder+Date.now()+'-'+Math.random().toString(36).slice(2)+'.jpg';await FS.copyAsync({from:uri,to:dest});return dest;}
 export async function removeImage(uri?:string){if(uri && FS.documentDirectory && uri.startsWith(FS.documentDirectory+'sources/'))await FS.deleteAsync(uri,{idempotent:true});}
 if(Platform.OS!=='web')Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})});
