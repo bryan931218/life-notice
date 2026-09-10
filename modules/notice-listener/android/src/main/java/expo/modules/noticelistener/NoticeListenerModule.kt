@@ -13,11 +13,16 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class NoticeListenerModule : Module() {
-  private fun enabled(): Boolean {
+  private fun listenerPermissionEnabled(): Boolean {
     val context = appContext.reactContext ?: return false
     val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: return false
     val expected = ComponentName(context, LifeNoticeListenerService::class.java)
     return flat.split(":").mapNotNull(ComponentName::unflattenFromString).any { it == expected }
+  }
+
+  private fun enabled(): Boolean {
+    val context = appContext.reactContext ?: return false
+    return listenerPermissionEnabled() && AppMonitorStore.selected(context).isNotEmpty()
   }
 
   private fun addCalendarEvent(title: String, startAt: Long, endAt: Long, allDay: Boolean, description: String, location: String, syncKey: String): String {
@@ -55,7 +60,7 @@ class NoticeListenerModule : Module() {
 
     Function("openSettings") {
       val context = appContext.reactContext ?: return@Function null
-      val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+      val intent = Intent(context, AppFilterActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
       context.startActivity(intent)
       null
     }
