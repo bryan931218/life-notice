@@ -5,24 +5,24 @@ import android.service.quicksettings.TileService
 import android.widget.Toast
 
 class LifeNoticeCaptureTileService : TileService() {
+  private fun candidate() = DetectedStore.get(this).firstOrNull { it.score >= 8 }
+
   override fun onStartListening() {
     super.onStartListening()
-    val hasCandidate = DetectedStore.get(this).isNotEmpty()
     qsTile?.apply {
       label = "擷取行程"
-      state = if (hasCandidate) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+      state = if (candidate() != null) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
       updateTile()
     }
   }
 
   override fun onClick() {
     super.onClick()
-    val item = DetectedStore.get(this).firstOrNull()
-    val result = item?.let { QuickCapture.capture(this, it) }
-      ?: QuickCaptureResult(false, "沒有可擷取的新通知。")
+    val result = candidate()?.let { QuickCapture.capture(this, it) }
+      ?: QuickCaptureResult(false, "目前沒有明確的重要行程可擷取。")
     Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
     qsTile?.apply {
-      state = if (DetectedStore.get(this@LifeNoticeCaptureTileService).isNotEmpty()) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+      state = if (candidate() != null) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
       updateTile()
     }
   }
