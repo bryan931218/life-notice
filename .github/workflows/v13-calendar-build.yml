@@ -26,8 +26,6 @@ jobs:
           echo "fbfae01307e5265f7877c162b43804dcc207abb5f289786c012b765bbb0edbf4  /tmp/ai-v12-patch.tar.gz" | sha256sum -c -
           tar -xzf /tmp/ai-v12-patch.tar.gz -C .
           cp staging/notice-listener-AndroidManifest.xml modules/notice-listener/android/src/main/AndroidManifest.xml
-          cp staging/notice-listener-LifeNoticeListenerService.kt modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt
-          cp staging/notice-listener-NoticeListenerModule.kt modules/notice-listener/android/src/main/java/expo/modules/noticelistener/NoticeListenerModule.kt
 
       - name: Apply verified v1.3 calendar overlay
         shell: bash
