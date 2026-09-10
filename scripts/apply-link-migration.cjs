@@ -3,6 +3,15 @@ const fs=require('fs');
 function writeIfChanged(path,next){const old=fs.readFileSync(path,'utf8');if(old!==next)fs.writeFileSync(path,next)}
 function mustReplace(text,oldValue,newValue,label){if(text.includes(newValue))return text;if(!text.includes(oldValue))throw new Error(`link migration: missing ${label}`);return text.replace(oldValue,newValue)}
 
+let ai=fs.readFileSync('src/ai.ts','utf8');
+ai=mustReplace(
+  ai,
+  "from './links';",
+  "from './links.ts';",
+  'Node-compatible links import'
+);
+writeIfChanged('src/ai.ts',ai);
+
 let app=fs.readFileSync('src/App.tsx','utf8');
 app=mustReplace(
   app,
