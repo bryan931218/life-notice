@@ -1,5 +1,5 @@
 Life Notice v1.5 build ready
-version=1.5.0-contextual-smart-assistant
+version=1.5.1-smart-location-links
 model=gpt-5.6-luna
 AI_KEY_EMBEDDED=false
 quiet-default=important
@@ -9,8 +9,9 @@ monitoring=explicit-app-allowlist-only
 todo=deadline-free-actions-no-time-confirmation
 conversation-context=15min+8-lines+same-thread+duplicate-line-collapse
 pending-context=keep-latest-overlapping-snapshot-only
-maps=preserve-google-maps-url-as-location-context
+maps=resolve-short-url+extract-place-name+clickable-google-maps
+web-links=clickable-from-event-detail
 messenger=relative-time+daypart+casual-plan+remoteinput-direct-reply
 ai-tools=create-calendar+create-todo+update+cancel+complete+ask+ignore+suggest-replies
 reply=explicit-user-tap-only
-retry=10
+retry=11
