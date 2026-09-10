@@ -1,5 +1,5 @@
 Life Notice v1.4 build ready
-version=1.4.3-allowlist-todo
+version=1.4.4-messenger-casual-schedule
 model=gpt-5.6-luna
 AI_KEY_EMBEDDED=false
 quiet-default=important
@@ -7,5 +7,6 @@ quick-capture=android-qs-tile+notification-action
 calendar=monthly
 monitoring=explicit-app-allowlist-only
 todo=deadline-free-actions-no-time-confirmation
-hotfix=ai-strict-schema+aggressive-notification-filter+native-mlkit-ocr+stored-noise-cleanup+api-key-validation+semantic-event-dedupe+app-allowlist+todo-mode
-retry=6
+messenger=relative-date+arabic-or-chinese-time+casual-plan-detection
+hotfix=ai-strict-schema+aggressive-notification-filter+native-mlkit-ocr+stored-noise-cleanup+api-key-validation+semantic-event-dedupe+app-allowlist+todo-mode+casual-messenger-schedule
+retry=7
