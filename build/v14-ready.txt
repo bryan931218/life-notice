@@ -5,4 +5,5 @@ AI_KEY_EMBEDDED=false
 quiet-default=important
 quick-capture=android-qs-tile+notification-action
 calendar=monthly
-retry=2
+hotfix=ai-strict-schema+aggressive-notification-filter
+retry=3
