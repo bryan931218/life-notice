@@ -42,6 +42,9 @@ jobs:
       - name: Apply v1.5 source migration
         run: node scripts/apply-v15-migration.cjs
 
+      - name: Apply Maps and URL migration
+        run: node scripts/apply-link-migration.cjs
+
       - name: Ensure generated assets
         shell: bash
         run: |
@@ -97,7 +100,7 @@ jobs:
           gh release create "$TAG" life-notice-v1.5.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "生活通知管家 v1.5 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.5：多則聊天上下文、Google Maps 地點連結、較少無謂時間確認、AI 多工具規劃、取消/完成既有項目、AI 快速回覆建議，以及 Messenger/LINE 原始通知 RemoteInput 點按回覆。AI 不會自動替使用者傳訊息。"
+            --notes "v1.5.1：多則聊天上下文、Google Maps 短網址解析地點名稱、行程內可直接開啟 Google Maps/原始網址、較少無謂時間確認、AI 快速回覆，以及 Messenger/LINE 原始通知點按回覆。AI 不會自動替使用者傳訊息。"
 
       - name: Persist migrated v1.5 source
         shell: bash
@@ -112,6 +115,6 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add "${PATHS[@]}"
-            git commit -m "Materialize v1.5 smart assistant source"
+            git commit -m "Materialize v1.5.1 smart links UI"
             git push origin HEAD:v14-build
           fi
