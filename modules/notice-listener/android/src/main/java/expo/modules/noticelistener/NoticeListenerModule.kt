@@ -104,6 +104,16 @@ class NoticeListenerModule : Module() {
       null
     }
 
+    Function("canReply") { noticeId: String ->
+      val context = appContext.reactContext ?: return@Function false
+      LifeNoticeListenerService.canReply(context, noticeId)
+    }
+
+    Function("reply") { noticeId: String, text: String ->
+      val context = appContext.reactContext ?: return@Function false
+      LifeNoticeListenerService.reply(context, noticeId, text)
+    }
+
     Function("addCalendarEvent") { title: String, startAt: Double, endAt: Double, allDay: Boolean, description: String, location: String, syncKey: String ->
       addCalendarEvent(title, startAt.toLong(), endAt.toLong(), allDay, description, location, syncKey)
     }
