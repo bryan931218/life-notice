@@ -1,9 +1,7 @@
 import type {Category, Importance, Notice} from './domain';
 
 export const AI_MODELS = [
-  ['gpt-5.6-luna','省錢 · GPT-5.6 Luna'],
-  ['gpt-5.6-terra','推薦 · GPT-5.6 Terra'],
-  ['gpt-5.6-sol','最準 · GPT-5.6 Sol'],
+  ['gpt-5.6-luna','GPT-5.6 Luna'],
 ] as const;
 export type AiModel = typeof AI_MODELS[number][0];
 
@@ -58,7 +56,7 @@ const tools=[
       checklist:{type:'array',items:{type:'string',maxLength:160},maxItems:8},
       importance:importanceProperty,
       ...common,
-    },required:['title','due_at','reminder_minutes','category','checklist','confidence','reason']}
+    },required:['title','due_at','reminder_minutes','category','checklist','importance','confidence','reason']}
   },
   {
     type:'function',name:'update_existing_event',strict:true,
@@ -114,11 +112,11 @@ async function requestDecision(apiKey:string, model:AiModel, input:any, existing
       model,
       store:false,
       reasoning:{effort:'low'},
-      max_output_tokens:900,
+      max_output_tokens:700,
       parallel_tool_calls:false,
       tool_choice:'required',
       tools,
-      instructions:'你是生活通知管家的行程判斷器。閱讀單一手機通知或截圖後，必須只選一個工具。重點是理解語意，不要只靠關鍵字。相對日期必須以提供的 received_at 與 device_timezone 換算。沒有足夠證據時絕對不要猜日期、時間、地點或人物；改用 ask_user。預設要安靜：一般聊天、貼圖、社群互動、廣告、新聞、純狀態通知，即使出現時間文字，只要使用者沒有明確要參加/完成/付款/領取/回覆的行動，就用 ignore_notification。只有值得放進行程或待辦的內容才 create；取消、改期、臨近期限等可標 urgent，需要主動注意的截止/預約/課程/會議標 important，其餘值得記錄但不緊急的才標 normal。若內容是既有活動的延期/更正，且 existing_upcoming_events 有明確對應，使用 update_existing_event。標題要短、自然、可直接放入行事曆。',
+      instructions:'你是生活通知管家的行程判斷器。閱讀單一手機通知或截圖後，必須只選一個工具。重點是理解語意，不要只靠關鍵字。相對日期必須以提供的 received_at 與 device_timezone 換算。沒有足夠證據時絕對不要猜日期、時間、地點或人物；改用 ask_user。預設要非常安靜：一般聊天、貼圖、社群互動、廣告、促銷、新聞、Samsung Rewards/點數、電池/省電模式、裝置狀態、下載完成、同步狀態、驗證碼，即使出現時間或「請」等文字，只要使用者沒有明確要參加/完成/付款/領取/回覆的行動，就用 ignore_notification。只有值得放進行程或待辦的內容才 create；取消、改期、臨近期限等可標 urgent，需要主動注意的截止/預約/課程/會議標 important，其餘值得記錄但不緊急的才標 normal。若內容是既有活動的延期/更正，且 existing_upcoming_events 有明確對應，使用 update_existing_event。標題要短、自然、可直接放入行事曆。',
       input,
     })
   });
