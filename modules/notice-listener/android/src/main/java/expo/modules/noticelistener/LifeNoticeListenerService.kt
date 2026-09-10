@@ -4,9 +4,11 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
@@ -14,6 +16,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
   companion object {
     private const val CHANNEL_ID = "life-notice-auto-detected"
     private const val CHANNEL_NAME = "重要行程"
+    @Volatile private var current: LifeNoticeListenerService? = null
 
     private val DATE = Regex("(?:20\\d{2}[年./-])?\\s*(?:1[0-2]|0?[1-9])[月./-](?:3[01]|[12]\\d|0?[1-9])(?:日|號)?")
     private val RELATIVE = Regex("今天|今晚|明天|明晚|後天|大後天|這週|本週|下週|下星期|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]")
@@ -28,12 +31,27 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
     private val IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|Samsung Rewards|Rewards|獲得\\s*\\d+\\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞", RegexOption.IGNORE_CASE)
+
+    fun canReply(context: Context, noticeId: String): Boolean = current?.replyActionFor(context, noticeId) != null
+
+    fun reply(context: Context, noticeId: String, text: String): Boolean {
+      if (text.isBlank()) return false
+      return current?.sendReply(context, noticeId, text.trim()) ?: false
+    }
+  }
+
+  override fun onListenerConnected() {
+    super.onListenerConnected()
+    current = this
+  }
+
+  override fun onDestroy() {
+    if (current === this) current = null
+    super.onDestroy()
   }
 
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
     if (sbn == null || sbn.packageName == packageName) return
-    // Privacy boundary: return before reading Notification.extras unless the user
-    // explicitly selected this app in Life Notice settings.
     if (!AppMonitorStore.isAllowed(applicationContext, sbn.packageName)) return
 
     val notification = sbn.notification ?: return
@@ -51,10 +69,6 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val hasChange = CHANGE.containsMatchIn(text)
     val aiEnabled = DetectedStore.aiMode(applicationContext)
 
-    // Selected messaging apps often express plans conversationally, e.g.
-    // "明天10.要吃飯嗎" or "明天十點吃早餐". These should reach AI instead of
-    // being discarded by a rigid keyword gate. They are queued silently first;
-    // AI/local inference still decides whether an event should actually be created.
     val conversationalPlan = hasDate && hasTime && hasSocialPlan
     val aiDateTimeCandidate = aiEnabled && hasDate && hasTime
     val candidate = hasChange ||
@@ -77,6 +91,8 @@ class LifeNoticeListenerService : NotificationListenerService() {
     }.getOrDefault(sbn.packageName)
     val id = DetectedStore.idFor(sbn.packageName, title, body, now)
     val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, body.ifBlank { title }, now, score, reason)
+
+    if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
     if (DetectedStore.add(applicationContext, item) && shouldNotifyNow(text, score)) notifyUser(item)
   }
 
@@ -87,10 +103,6 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
     val urgentChange = CHANGE.containsMatchIn(text)
     val explicitImportant = IMPORTANT.containsMatchIn(text)
-
-    // Stay quiet for ordinary todos. A concrete conversational appointment with both
-    // date and time is useful enough to surface once; DetectedStore collapses exact
-    // repeated Messenger notifications for the same day.
     return (urgentChange && score >= 7) ||
       (explicitImportant && (hasDate || hasStrong) && score >= 9) ||
       (hasDate && hasStrong && score >= 10) ||
@@ -111,6 +123,45 @@ class LifeNoticeListenerService : NotificationListenerService() {
       line?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(parts::add)
     }
     return title.trim() to parts.joinToString("\n").take(8000)
+  }
+
+  private fun replyInputs(notification: Notification): Pair<Notification.Action, Array<RemoteInput>>? {
+    val actions = notification.actions ?: return null
+    for (action in actions) {
+      val inputs = action.remoteInputs?.filter { it.allowFreeFormInput }?.toTypedArray().orEmpty()
+      if (inputs.isNotEmpty()) return action to inputs
+    }
+    return null
+  }
+
+  private fun hasReplyAction(notification: Notification): Boolean = replyInputs(notification) != null
+
+  private fun replyActionFor(context: Context, noticeId: String): Pair<Notification.Action, Array<RemoteInput>>? {
+    val target = ReplyTargetStore.get(context, noticeId) ?: return null
+    val active = runCatching { activeNotifications.toList() }.getOrDefault(emptyList())
+    val exact = active.firstOrNull { it.key == target.notificationKey }
+    if (exact != null) return replyInputs(exact.notification)
+
+    val fallback = active
+      .filter { it.packageName == target.packageName }
+      .sortedByDescending { it.postTime }
+      .firstOrNull { sbn ->
+        val (title, _) = extract(sbn.notification)
+        target.title.isBlank() || title == target.title
+      } ?: return null
+    return replyInputs(fallback.notification)
+  }
+
+  private fun sendReply(context: Context, noticeId: String, text: String): Boolean {
+    val (action, inputs) = replyActionFor(context, noticeId) ?: return false
+    return runCatching {
+      val intent = Intent()
+      val results = Bundle()
+      inputs.forEach { input -> results.putCharSequence(input.resultKey, text.take(500)) }
+      RemoteInput.addResultsToIntent(inputs, intent, results)
+      action.actionIntent.send(context, 0, intent)
+      true
+    }.getOrDefault(false)
   }
 
   private fun score(text: String): Pair<Int, String> {
