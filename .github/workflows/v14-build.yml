@@ -1,0 +1,97 @@
+name: Build Life Notice v1.4 Android
+
+on:
+  push:
+    branches: [v14-build]
+    paths:
+      - 'build/v14-ready.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  build-v14:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      APP_IDENTIFIER: com.bryan931218.lifenotice
+    steps:
+      - name: Checkout v1.4
+        uses: actions/checkout@v4
+        with:
+          ref: v14-build
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Ensure generated assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f assets/icon.png
+          test -f assets/notification-icon.png
+          if [ ! -f assets/adaptive-icon.png ]; then cp assets/icon.png assets/adaptive-icon.png; fi
+
+      - name: Verify TypeScript and tests
+        run: npm run verify
+
+      - name: Generate Android native project
+        env:
+          CI: 1
+          NODE_ENV: production
+        run: npm run prebuild:android
+
+      - name: Build APK and AAB
+        env:
+          NODE_ENV: production
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Prepare packages
+        shell: bash
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.4.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.4.aab
+          sha256sum life-notice-v1.4.apk life-notice-v1.4.aab > SHA256SUMS.txt
+
+      - name: Upload Android packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: life-notice-v1.4-android
+          path: |
+            life-notice-v1.4.apk
+            life-notice-v1.4.aab
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v14-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v1.4.apk SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "生活通知管家 v1.4 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.4：極簡介面、固定使用 GPT-5.6 Luna、預設重要才提醒、內建月曆、Android 快速設定『擷取行程』與重要通知的『加入行事曆』動作。AI 預設關閉且 API key 不內建。"
