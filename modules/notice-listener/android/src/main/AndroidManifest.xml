@@ -1,5 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <application>
+    <activity
+      android:name="expo.modules.noticelistener.AppFilterActivity"
+      android:label="監聽的應用程式"
+      android:exported="false"
+      android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+
     <service
       android:name="expo.modules.noticelistener.LifeNoticeListenerService"
       android:label="生活通知管家自動偵測"
