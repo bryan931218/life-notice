@@ -20,13 +20,15 @@ class LifeNoticeListenerService : NotificationListenerService() {
 
     private val DATE = Regex("(?:20\\d{2}[年./-])?\\s*(?:1[0-2]|0?[1-9])[月./-](?:3[01]|[12]\\d|0?[1-9])(?:日|號)?")
     private val RELATIVE = Regex("今天|今晚|明天|明晚|後天|大後天|這週|本週|下週|下星期|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]")
+    private val DAYPART = Regex("早上|上午|中午|下午|晚上|晚間|今晚|明晚")
     private val ARABIC_TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*)?(?:[01]?\\d|2[0-3])(?:\\s*(?:[:：點時]\\s*[0-5]?\\d?|點半)|\\.(?=\\D|$))")
     private val RELATIVE_NUMBER_TIME = Regex("(?:今天|今晚|明天|明晚|後天|大後天|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天])[^\\n]{0,5}(?:[01]?\\d|2[0-3])(?=\\s|[.。,:：點時]|$)")
     private val CHINESE_TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*)?(?:二十[零〇一二三]?|十[零〇一二三四五六七八九]?|[零〇一二兩三四五六七八九])點(?:半|[零〇一二兩三四五六七八九十]{1,3}分?)?")
+    private val MAP_LINK = Regex("https?://(?:maps\\.app\\.goo\\.gl|goo\\.gl/maps|www\\.google\\.[^/]+/maps|maps\\.google\\.)/[^\\s]+", RegexOption.IGNORE_CASE)
     private val HIGH_INTENT = Regex("截止|最晚|到期|繳交|繳費|繳款|付款|取件|領取|取貨|集合|報名|預約|會議|開會|面試|上課|考試|比賽|登機|出發|看診|門診|回診|訂位|入住|退房")
     private val TASK_INTENT = Regex("填寫|回覆|提交|完成|準備|攜帶|帶上|聯絡|寄送|繳交|繳費|付款|領取|取件|報名|預約|購買|買|訂購|確認")
     private val EVENT = Regex("活動|課程|講座|聚餐|會議|比賽|考試|面試|預約|看診|回診|集合|出發|登機|訂位")
-    private val SOCIAL_PLAN = Regex("吃飯|吃早餐|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|練球|唱歌|逛街|約一下|約嗎|要不要|一起")
+    private val SOCIAL_PLAN = Regex("吃飯|吃早餐|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|練球|唱歌|逛街|約一下|約嗎|要不要|一起|吃這家|去這家")
     private val ACTION = Regex("請|需要|需|須|務必|記得|別忘|回覆|填寫|完成|提交|繳|帶|攜帶|準備|確認|參加|出席|領取|取件|付款|報名|預約")
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
@@ -56,11 +58,24 @@ class LifeNoticeListenerService : NotificationListenerService() {
 
     val notification = sbn.notification ?: return
     val (title, body) = extract(notification)
-    val text = listOf(title, body).filter { it.isNotBlank() }.distinct().joinToString("\n").trim()
-    if (text.length < 3 || IGNORE.containsMatchIn(text)) return
+    val currentText = listOf(title, body).filter { it.isNotBlank() }.distinct().joinToString("\n").trim()
+    if (currentText.length < 3 || IGNORE.containsMatchIn(currentText)) return
+
+    val now = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
+    val contextLines = ConversationBufferStore.append(
+      applicationContext,
+      sbn.packageName,
+      title.ifBlank { sbn.packageName },
+      body.ifBlank { title },
+      now
+    )
+    val contextText = ConversationBufferStore.format(contextLines)
+    val text = listOf(title, contextText).filter { it.isNotBlank() }.joinToString("\n").trim()
 
     val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
     val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
+    val hasDaypart = DAYPART.containsMatchIn(text)
+    val hasMapLink = MAP_LINK.containsMatchIn(text)
     val hasHighIntent = HIGH_INTENT.containsMatchIn(text)
     val hasTaskIntent = TASK_INTENT.containsMatchIn(text)
     val hasEvent = EVENT.containsMatchIn(text)
@@ -69,28 +84,30 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val hasChange = CHANGE.containsMatchIn(text)
     val aiEnabled = DetectedStore.aiMode(applicationContext)
 
-    val conversationalPlan = hasDate && hasTime && hasSocialPlan
-    val aiDateTimeCandidate = aiEnabled && hasDate && hasTime
+    // A short sequence of messages in the same conversation is treated as one context.
+    // This catches patterns such as "明天晚上吃這家喔" followed by a Google Maps URL.
+    val conversationalPlan = hasDate && hasSocialPlan && (hasTime || hasDaypart || hasMapLink)
+    val aiContextCandidate = aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink) &&
+      (hasSocialPlan || hasMapLink || hasHighIntent || hasEvent)
     val candidate = hasChange ||
       hasTaskIntent ||
       conversationalPlan ||
-      aiDateTimeCandidate ||
-      (hasHighIntent && (hasDate || hasTime || hasAction)) ||
+      aiContextCandidate ||
+      (hasHighIntent && (hasDate || hasTime || hasDaypart || hasAction)) ||
       (hasDate && hasAction) ||
-      (hasDate && hasTime && hasEvent)
+      (hasDate && (hasTime || hasDaypart) && hasEvent)
     if (!candidate) return
 
     val (score, reason) = score(text)
-    val minScore = if (aiEnabled && hasDate && hasTime) 5 else 7
+    val minScore = if (aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink)) 5 else 7
     if (score < minScore) return
 
-    val now = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
     val appName = runCatching {
       val info = packageManager.getApplicationInfo(sbn.packageName, 0)
       packageManager.getApplicationLabel(info).toString()
     }.getOrDefault(sbn.packageName)
-    val id = DetectedStore.idFor(sbn.packageName, title, body, now)
-    val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, body.ifBlank { title }, now, score, reason)
+    val id = DetectedStore.idFor(sbn.packageName, title, text, now)
+    val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, text.ifBlank { currentText }, now, score, reason)
 
     if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
     if (DetectedStore.add(applicationContext, item) && shouldNotifyNow(text, score)) notifyUser(item)
@@ -99,6 +116,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
   private fun shouldNotifyNow(text: String, score: Int): Boolean {
     val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
     val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
+    val hasDaypart = DAYPART.containsMatchIn(text)
     val hasStrong = HIGH_INTENT.containsMatchIn(text)
     val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
     val urgentChange = CHANGE.containsMatchIn(text)
@@ -106,7 +124,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     return (urgentChange && score >= 7) ||
       (explicitImportant && (hasDate || hasStrong) && score >= 9) ||
       (hasDate && hasStrong && score >= 10) ||
-      (hasDate && hasTime && hasSocialPlan && score >= 9)
+      (hasDate && (hasTime || hasDaypart) && hasSocialPlan && score >= 9)
   }
 
   private fun extract(notification: Notification): Pair<String, String> {
@@ -146,8 +164,8 @@ class LifeNoticeListenerService : NotificationListenerService() {
       .filter { it.packageName == target.packageName }
       .sortedByDescending { it.postTime }
       .firstOrNull { sbn ->
-        val (title, _) = extract(sbn.notification)
-        target.title.isBlank() || title == target.title
+        val (activeTitle, _) = extract(sbn.notification)
+        target.title.isBlank() || activeTitle == target.title
       } ?: return null
     return replyInputs(fallback.notification)
   }
@@ -171,7 +189,10 @@ class LifeNoticeListenerService : NotificationListenerService() {
     if (RELATIVE.containsMatchIn(text)) { score += 4; reasons += "相對日期" }
     if (ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)) {
       score += 3; reasons += "時間"
+    } else if (DAYPART.containsMatchIn(text)) {
+      score += 2; reasons += "時段"
     }
+    if (MAP_LINK.containsMatchIn(text)) { score += 3; reasons += "地點連結" }
     if (HIGH_INTENT.containsMatchIn(text)) { score += 5; reasons += "行程/期限" }
     else if (EVENT.containsMatchIn(text)) { score += 3; reasons += "活動語意" }
     if (SOCIAL_PLAN.containsMatchIn(text)) { score += 3; reasons += "約定語意" }
