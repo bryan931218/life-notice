@@ -1,10 +1,10 @@
 Life Notice v1.5 build ready
-version=1.5.2-gmail-strict-filter
+version=1.5.3-polished-calendar-ui
 model=gpt-5.6-luna
 AI_KEY_EMBEDDED=false
 quiet-default=important
 quick-capture=android-qs-tile+notification-action
-calendar=monthly
+calendar=monthly+tap-day-agenda+timeline
 monitoring=explicit-app-allowlist-only
 todo=deadline-free-actions-no-time-confirmation
 conversation-context=15min+8-lines+same-thread+duplicate-line-collapse
@@ -13,6 +13,7 @@ maps=resolve-short-url+extract-place-name+clickable-google-maps
 web-links=clickable-from-event-detail
 messenger=relative-time+daypart+casual-plan+remoteinput-direct-reply
 gmail=drop-group-summary+broadcast-info+license-expiry+ai-required-no-local-fallback+cleanup-old
+ui=no-global-fab+home-inline-add+calendar-day-add+reduced-detail-actions
 ai-tools=create-calendar+create-todo+update+cancel+complete+ask+ignore+suggest-replies
 reply=explicit-user-tap-only
-retry=14
+retry=15
