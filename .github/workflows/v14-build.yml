@@ -48,6 +48,9 @@ jobs:
       - name: Apply Gmail false-positive filtering
         run: node scripts/apply-v152-gmail-filter.cjs
 
+      - name: Clean old Gmail false positives
+        run: node scripts/apply-v152-gmail-cleanup.cjs
+
       - name: Ensure generated assets
         shell: bash
         run: |
@@ -103,7 +106,7 @@ jobs:
           gh release create "$TAG" life-notice-v1.5.2.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
             --title "生活通知管家 v1.5.2 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.5.2：Gmail 嚴格過濾。群組摘要、全校/系統公告、條件式資訊、軟體授權到期等不再直接視為行程；Gmail 僅在明確個人行動或個人會議/預約時交給 AI，AI 不可用時不再退回寬鬆本機規則。保留 v1.5.1 的多則聊天上下文、Google Maps 地點與快速回覆。"
+            --notes "v1.5.2：Gmail 嚴格過濾。群組摘要、全校/系統公告、條件式資訊、軟體授權到期等不再直接視為行程；Gmail 僅在明確個人行動或個人會議/預約時交給 AI，AI 不可用時不再退回寬鬆本機規則。升級後也會清理先前誤判的 Gmail 自動項目。保留 v1.5.1 的多則聊天上下文、Google Maps 地點與快速回覆。"
 
       - name: Persist migrated v1.5 source
         shell: bash
