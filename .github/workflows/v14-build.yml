@@ -1,10 +1,9 @@
-name: Build Life Notice v1.5 Android
+name: Build Life Notice Android preview
 
 on:
+  workflow_dispatch:
   push:
-    branches: [v14-build]
-    paths:
-      - 'build/v14-ready.txt'
+    branches: [v14-build, codex/listener-settings]
 
 permissions:
   contents: write
@@ -16,43 +15,26 @@ jobs:
     env:
       APP_IDENTIFIER: com.bryan931218.lifenotice
     steps:
-      - name: Checkout v1.5
+      - name: Checkout current source
         uses: actions/checkout@v4
-        with:
-          ref: v14-build
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Set up JDK
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
           cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
       - name: Install dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund
-
-      - name: Apply v1.5 source migration
-        run: node scripts/apply-v15-migration.cjs
-
-      - name: Apply Maps and URL migration
-        run: node scripts/apply-link-migration.cjs
-
-      - name: Apply Gmail false-positive filtering
-        run: node scripts/apply-v152-gmail-filter.cjs
-
-      - name: Clean old Gmail false positives
-        run: node scripts/apply-v152-gmail-cleanup.cjs
-
-      - name: Apply polished UI and calendar
-        run: node scripts/apply-v153-ui-migration.cjs
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Ensure generated assets
         shell: bash
@@ -84,17 +66,17 @@ jobs:
       - name: Prepare packages
         shell: bash
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.3.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.3.aab
-          sha256sum life-notice-v1.5.3.apk life-notice-v1.5.3.aab > SHA256SUMS.txt
+          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.4.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.4.aab
+          sha256sum life-notice-v1.5.4.apk life-notice-v1.5.4.aab > SHA256SUMS.txt
 
       - name: Upload Android packages
         uses: actions/upload-artifact@v4
         with:
-          name: life-notice-v1.5.3-android
+          name: life-notice-v1.5.4-android
           path: |
-            life-notice-v1.5.3.apk
-            life-notice-v1.5.3.aab
+            life-notice-v1.5.4.apk
+            life-notice-v1.5.4.aab
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -105,30 +87,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="v153-preview-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" life-notice-v1.5.3.apk SHA256SUMS.txt \
-            --target "$GITHUB_SHA" \
-            --title "生活通知管家 v1.5.3 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.5.3：重新設計月曆與日期詳情。點選日期即可查看當日時間軸、分類、地點與狀態；移除會遮住內容的全域浮動新增鍵，首頁與月曆各保留單一明確新增入口；行程詳情減少多餘主要按鈕。保留 Gmail 嚴格過濾、聊天上下文、Google Maps 地點與快速回覆。"
-
-      - name: Persist migrated v1.5 source
-        shell: bash
-        run: |
-          set -euo pipefail
-          PATHS=(
-            src/App.tsx
-            src/calendar-ui.tsx
-            src/domain.ts
-            src/ai.ts
-            src/services.ts
-            src/gmail-filter.ts
-            package.json
-            modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt
-          )
-          if ! git diff --quiet -- "${PATHS[@]}"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add "${PATHS[@]}"
-            git commit -m "Materialize v1.5.3 polished calendar UI"
-            git push origin HEAD:v14-build
-          fi
+          TAG="v154-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v1.5.4.apk SHA256SUMS.txt \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "生活通知管家 v1.5.4 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.5.4 測試版：重新設計監聽 App 管理、搜尋與已選篩選；設定分組、提醒偏好保存、預設提醒、API 金鑰驗證及明確操作回饋。測試簽章，非商店正式版。"

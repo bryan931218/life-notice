@@ -33,6 +33,11 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
     private val IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|Samsung Rewards|Rewards|獲得\\s*\\d+\\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞", RegexOption.IGNORE_CASE)
+    private const val GMAIL_PACKAGE = "com.google.android.gm"
+    private val GMAIL_SUMMARY = Regex("\\b\\d+\\s*封新郵件\\b|\\b\\d+\\s+new\\s+emails?\\b|new mail summary", RegexOption.IGNORE_CASE)
+    private val GMAIL_BROADCAST = Regex("全校公告(?:信)?|校務公告|服務公告|系統公告|資訊技術服務中心|軍訓室[^\\n]{0,20}(?:公告|通知|注意事項)|電子報|newsletter|Adobe\\s+Creative\\s+Cloud|授權[^\\n]{0,20}到期", RegexOption.IGNORE_CASE)
+    private val GMAIL_PERSONAL = Regex("邀請您|邀請你|請您|請你|您已|你已|您的|你的|錄取通知|面試通知|預約確認|預約成功|訂位成功|報名成功|繳費通知|付款通知|帳單|行事曆邀請|calendar invitation|meeting invitation", RegexOption.IGNORE_CASE)
+    private val GMAIL_IMMEDIATE = Regex("邀請您|邀請你|面試通知|預約成功|訂位成功|報名成功|繳費通知|付款期限|會議邀請|calendar invitation|meeting invitation|(?:今天|明天|後天)[^\\n]{0,30}(?:開會|會議|面試|考試|上課|看診|預約)", RegexOption.IGNORE_CASE)
 
     fun canReply(context: Context, noticeId: String): Boolean = current?.replyActionFor(context, noticeId) != null
 
@@ -57,9 +62,14 @@ class LifeNoticeListenerService : NotificationListenerService() {
     if (!AppMonitorStore.isAllowed(applicationContext, sbn.packageName)) return
 
     val notification = sbn.notification ?: return
+    if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
     val (title, body) = extract(notification)
     val currentText = listOf(title, body).filter { it.isNotBlank() }.distinct().joinToString("\n").trim()
     if (currentText.length < 3 || IGNORE.containsMatchIn(currentText)) return
+    if (sbn.packageName == GMAIL_PACKAGE) {
+      if (GMAIL_SUMMARY.containsMatchIn(currentText)) return
+      if (GMAIL_BROADCAST.containsMatchIn(currentText) && !GMAIL_PERSONAL.containsMatchIn(currentText)) return
+    }
 
     val now = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
     val contextLines = ConversationBufferStore.append(
@@ -110,10 +120,11 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, text.ifBlank { currentText }, now, score, reason)
 
     if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
-    if (DetectedStore.add(applicationContext, item) && shouldNotifyNow(text, score)) notifyUser(item)
+    if (DetectedStore.add(applicationContext, item) && shouldNotifyNow(text, score, sbn.packageName)) notifyUser(item)
   }
 
-  private fun shouldNotifyNow(text: String, score: Int): Boolean {
+  private fun shouldNotifyNow(text: String, score: Int, sourcePackage: String): Boolean {
+    if (sourcePackage == GMAIL_PACKAGE && !GMAIL_IMMEDIATE.containsMatchIn(text)) return false
     val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
     val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
     val hasDaypart = DAYPART.containsMatchIn(text)
@@ -121,6 +132,9 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
     val urgentChange = CHANGE.containsMatchIn(text)
     val explicitImportant = IMPORTANT.containsMatchIn(text)
+    val level = DetectedStore.alertLevel(applicationContext)
+    if (level == "all" && score >= 7) return true
+    if (level == "balanced" && hasDate && score >= 8) return true
     return (urgentChange && score >= 7) ||
       (explicitImportant && (hasDate || hasStrong) && score >= 9) ||
       (hasDate && hasStrong && score >= 10) ||
@@ -143,7 +157,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     return title.trim() to parts.joinToString("\n").take(8000)
   }
 
-  private fun replyInputs(notification: Notification): Pair<Notification.Action, Array<RemoteInput>>? {
+  private fun replyInputs(notification: Notification): Pair<Notification.Action, Array<out RemoteInput>>? {
     val actions = notification.actions ?: return null
     for (action in actions) {
       val inputs = action.remoteInputs?.filter { it.allowFreeFormInput }?.toTypedArray().orEmpty()
@@ -154,7 +168,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
 
   private fun hasReplyAction(notification: Notification): Boolean = replyInputs(notification) != null
 
-  private fun replyActionFor(context: Context, noticeId: String): Pair<Notification.Action, Array<RemoteInput>>? {
+  private fun replyActionFor(context: Context, noticeId: String): Pair<Notification.Action, Array<out RemoteInput>>? {
     val target = ReplyTargetStore.get(context, noticeId) ?: return null
     val active = runCatching { activeNotifications.toList() }.getOrDefault(emptyList())
     val exact = active.firstOrNull { it.key == target.notificationKey }
@@ -176,7 +190,8 @@ class LifeNoticeListenerService : NotificationListenerService() {
       val intent = Intent()
       val results = Bundle()
       inputs.forEach { input -> results.putCharSequence(input.resultKey, text.take(500)) }
-      RemoteInput.addResultsToIntent(inputs, intent, results)
+      val inputArray = inputs.map { it }.toTypedArray()
+      RemoteInput.addResultsToIntent(inputArray, intent, results)
       action.actionIntent.send(context, 0, intent)
       true
     }.getOrDefault(false)

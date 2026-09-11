@@ -1,5 +1,7 @@
+import {displayDay,displayTime} from './calendar';
+import {SettingsPanel} from './settings-panel';
 import React,{useEffect,useRef,useState} from 'react';
-import {ActivityIndicator,AppState,Image,KeyboardAvoidingView,Modal,Platform,Pressable,ScrollView,Switch,Text,View} from 'react-native';
+import {ActivityIndicator,AppState,Image,KeyboardAvoidingView,Linking,Modal,Platform,Pressable,ScrollView,Switch,Text,View} from 'react-native';
 import {SafeAreaProvider,SafeAreaView} from 'react-native-safe-area-context';
 import {StatusBar} from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -14,18 +16,20 @@ import * as api from './services';
 import {Button,Chips,Field,Icon,confirm,notify,p,s} from './ui';
 import {MonthCalendar} from './calendar-ui';
 import {privacy} from './privacy';
+import {canReplyToNotification,replyToNotification} from './reply';
+import {displayLocation,extractUrls,firstGoogleMapsUrl,googleMapsSearchUrl,isGoogleMapsUrl,linkHost} from './links';
 
 type Tab='home'|'calendar'|'manual'|'settings';
 type Draft={title:string;source:string;image?:string;category:Category;date:string;time:string;assignee:string;checks:string;remind:number|null;editing?:string};
 const blank=():Draft=>({title:'',source:'',category:'生活',date:'',time:'',assignee:'我',checks:'',remind:60});
 const isAuto=(n:Notice)=>/^\[(?:AI)?自動偵測｜/.test(n.source);
 const stripDetectedId=(source:string)=>source.replace(/\n\[偵測ID:[^\]]+\]$/,'');
-const whenLabel=(n:Notice)=>n.dueAt?new Date(n.dueAt).toLocaleString('zh-TW',{month:'numeric',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'}):n.needsReview?'時間待確認':'無期限待辦';
+const whenLabel=(n:Notice)=>n.dueAt?`${displayDay(new Date(n.dueAt))} ${n.allDay?'全天':displayTime(new Date(n.dueAt))}`:n.needsReview?'時間待確認':'無期限待辦';
 
 function aiNotice(decision:AiDecision,item:api.DetectedNotification,raw:string):Notice|null{
-  if(decision.type==='ignore_notification'||decision.type==='update_existing_event')return null;
+  if(decision.type==='ignore_notification'||decision.type==='update_existing_event'||decision.type==='cancel_existing_event'||decision.type==='complete_existing_task')return null;
   const now=new Date().toISOString(),createdAt=new Date(item.receivedAt).toISOString();
-  const common={id:id(),source:`[AI自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,assignee:'我',done:false,createdAt,updatedAt:now,history:[],aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance};
+  const common={id:id(),source:`[AI自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,assignee:'我',done:false,createdAt,updatedAt:now,history:[],aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance,replySuggestions:'replySuggestions' in decision?decision.replySuggestions:[]};
   if(decision.type==='create_calendar_event')return {...common,title:decision.title,category:decision.category,dueAt:decision.startAt,endAt:decision.endAt,allDay:decision.allDay,location:decision.location??undefined,needsReview:decision.confidence<0.86,checklist:decision.checklist.map(text=>({id:id(),text,done:false})),remindMinutes:decision.importance==='normal'?null:decision.reminderMinutes};
   if(decision.type==='create_task')return {...common,title:decision.title,category:decision.category,dueAt:decision.dueAt,needsReview:decision.confidence<0.65,checklist:decision.checklist.map(text=>({id:id(),text,done:false})),remindMinutes:decision.dueAt?decision.reminderMinutes:null};
   return {...common,title:decision.title,category:decision.category,dueAt:decision.proposedAt,needsReview:true,checklist:[{id:id(),text:decision.question,done:false}],remindMinutes:null};
@@ -54,9 +58,14 @@ function Main(){
   const [advanced,setAdvanced]=useState(false);
   const [detailMore,setDetailMore]=useState(false);
   const [dataMore,setDataMore]=useState(false);
+  const [defaultReminder,setDefaultReminder]=useState<number|null>(60);
+  const refreshSettings=async()=>{setDefaultReminder(await api.getDefaultReminder());setAiConfig(await api.getAiSettings());setAutoCalendar(await api.getAutoCalendarEnabled());setAiHasKey(await api.hasOpenAiKey());};
   const lock=useRef(false);
   const scroll=useRef<ScrollView>(null);
   const notice=data.notices.find(n=>n.id===selected);
+  const noticeLinks=notice?extractUrls(notice.source):[];
+  const noticeMapUrl=notice?(firstGoogleMapsUrl(notice.source)??(notice.location?(isGoogleMapsUrl(notice.location)?notice.location:googleMapsSearchUrl(notice.location)):null)):null;
+  const noticeWebLinks=noticeLinks.filter(url=>!isGoogleMapsUrl(url)).slice(0,3);
 
   const commit=async(next:State,permission=false)=>{
     await api.persist(next);live.current=next;setData(next);
@@ -80,6 +89,8 @@ function Main(){
       if(seen.has(item.id)){processed.push(item.id);continue}
       const raw=[item.title,item.text].filter(Boolean).join('\n').trim();
       if(!raw){processed.push(item.id);continue}
+      const sourcePolicy=api.notificationPolicy(item);
+      if(sourcePolicy==='ignore'){processed.push(item.id);continue}
       let made:Notice|null=null;
       if(settings.enabled&&key){
         try{
@@ -89,13 +100,22 @@ function Main(){
             const old=next.notices.find(n=>n.id===decision.eventId);
             if(old){
               const source=`${old.source}\n\n[AI 更正來源｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
-              next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{title:decision.title??n.title,dueAt:decision.startAt??n.dueAt,endAt:decision.endAt??n.endAt,location:decision.location??n.location,remindMinutes:decision.reminderMinutes??n.remindMinutes,source,needsReview:decision.confidence<0.9,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance}):n)};
+              next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{title:decision.title??n.title,dueAt:decision.startAt??n.dueAt,endAt:decision.endAt??n.endAt,location:decision.location??n.location,remindMinutes:decision.reminderMinutes??n.remindMinutes,source,needsReview:decision.confidence<0.9,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance,replySuggestions:decision.replySuggestions}):n)};
+              changed=true;processed.push(item.id);continue;
+            }
+          }
+          if(decision.type==='cancel_existing_event'||decision.type==='complete_existing_task'){
+            const old=next.notices.find(n=>n.id===decision.eventId);
+            if(old){
+              const source=`${old.source}\n\n[AI 狀態更新｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
+              next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,source,needsReview:false,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.type==='cancel_existing_event'?decision.importance:n.importance,replySuggestions:decision.replySuggestions}):n)};
               changed=true;processed.push(item.id);continue;
             }
           }
           made=aiNotice(decision,item,raw);
         }catch(e){console.warn('AI notification analysis failed',e)}
       }
+      if(!made&&sourcePolicy==='ai_required'){processed.push(item.id);continue}
       if(!made){
         const inferred=inferLiveNotification(raw,item.receivedAt);
         if(!inferred.actionable){processed.push(item.id);continue}
@@ -124,7 +144,7 @@ function Main(){
   };
 
   useEffect(()=>{
-    void reload();
+    void reload();void refreshSettings();
     const app=AppState.addEventListener('change',state=>{if(state==='active'){setListenerEnabled(api.notificationListenerEnabled());void importDetected()}});
     const timer=setInterval(()=>{if(AppState.currentState==='active')void importDetected()},15000);
     let response:ReturnType<typeof Notifications.addNotificationResponseReceivedListener>|undefined;
@@ -139,8 +159,8 @@ function Main(){
 
   const run=async(job:()=>Promise<void>)=>{if(lock.current)return;lock.current=true;setBusy(true);try{await job()}catch(e){notify(e instanceof Error?e.message:'操作失敗，請稍後再試。')}finally{lock.current=false;setBusy(false)}};
   const patchDraft=(patch:Partial<Draft>)=>setDraft(d=>({...d,...patch}));
-  const startManual=()=>{setDraft(blank());setWarnings([]);setMessage('');setAdvanced(false);setTab('manual')};
-  const addForDate=(date:string)=>{setDraft({...blank(),date});setWarnings([]);setMessage('');setAdvanced(false);setTab('manual')};
+  const startManual=()=>{setDraft({...blank(),remind:defaultReminder});setWarnings([]);setMessage('');setAdvanced(false);setTab('manual')};
+  const addForDate=(date:string)=>{setDraft({...blank(),date,remind:defaultReminder});setWarnings([]);setMessage('');setAdvanced(false);setTab('manual')};
   const applyInference=(source:string)=>{
     const r=inferNotice(source);
     setDraft(d=>({...d,source,title:r.title,category:r.category,date:r.date,time:r.time,checks:r.checklist.join('\n')}));
@@ -158,6 +178,7 @@ function Main(){
         let raw='';try{raw=await api.recognize(uri)}catch{}
         if(decision.type==='ignore_notification'){setDraft(d=>({...d,image:uri,source:raw}));setMessage('AI 判斷這張圖沒有需要建立的行程或待辦。');return}
         if(decision.type==='update_existing_event'){const old=live.current.notices.find(n=>n.id===decision.eventId);if(old){edit(old);setMessage('已找到對應的既有行程。')}return}
+        if(decision.type==='cancel_existing_event'||decision.type==='complete_existing_task'){setMessage('AI 判斷這張圖是在更新既有項目。');return}
         const when=decision.type==='create_calendar_event'?decision.startAt:decision.type==='create_task'?decision.dueAt:decision.proposedAt;
         const f=dateFields(when),checks=decision.type==='ask_user'?[decision.question]:decision.checklist;
         setDraft(d=>({...d,image:uri,source:raw,title:decision.title,category:decision.category,date:f.date,time:f.time,checks:checks.join('\n'),remind:decision.type==='create_calendar_event'?decision.reminderMinutes:decision.type==='create_task'?decision.reminderMinutes:null}));
@@ -172,7 +193,7 @@ function Main(){
     const dueAt=parseDate(draft.date,draft.time);
     let sourceImage:string|undefined=draft.image;
     if(sourceImage&&!sourceImage.startsWith(FS.documentDirectory??'__none__'))sourceImage=await api.keepImage(sourceImage);
-    const checks=draft.checks.split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,50).map(text=>({id:id(),text,done:false}));
+    const oldChecks=live.current.notices.find(n=>n.id===draft.editing)?.checklist??[];const checks=[...new Set(draft.checks.split(/\n+/).map(x=>x.trim()).filter(Boolean))].slice(0,50).map(text=>oldChecks.find(c=>c.text===text)??{id:id(),text,done:false});
     const now=new Date().toISOString();const remindMinutes=dueAt?draft.remind:null;let next:State;
     if(draft.editing){
       const old=live.current.notices.find(n=>n.id===draft.editing);if(!old)throw new Error('找不到要編輯的項目。');
@@ -206,7 +227,7 @@ function Main(){
   const todoRow=(n:Notice)=><View key={n.id} style={[s.card,{paddingVertical:14}]}><View style={s.row}><Pressable accessibilityRole="checkbox" accessibilityState={{checked:false}} accessibilityLabel={`完成 ${n.title}`} onPress={()=>toggle(n)} style={{padding:3}}><Icon name="ellipse-outline" size={28}/></Pressable><Pressable style={s.flex} onPress={()=>setSelected(n.id)}><Text numberOfLines={2} style={[s.cardTitle,{marginBottom:0}]}>{n.title}</Text>{isAuto(n)&&<Text style={s.caption}>自動建立</Text>}</Pressable><Icon name="chevron-forward" color={p.muted} size={18}/></View></View>;
   const empty=(text:string)=><View style={[s.empty,{paddingVertical:22}]}><Icon name="checkmark-circle-outline" size={28}/><Text style={s.emptyTitle}>{text}</Text></View>;
 
-  if(!ready)return <SafeAreaView style={[s.root,{alignItems:'center',justifyContent:'center'}]}><ActivityIndicator/></SafeAreaView>;
+  if(!ready&&!loadError)return <SafeAreaView style={[s.root,{alignItems:'center',justifyContent:'center'}]}><ActivityIndicator/></SafeAreaView>;
   if(loadError)return <SafeAreaView style={s.root}><View style={s.content}><Text style={s.warning}>{loadError}</Text><Button label="重新載入" onPress={()=>void reload()}/></View></SafeAreaView>;
   const draftIsTodo=!draft.date.trim()&&!draft.time.trim();
   const screenTitle=tab==='home'?'今天':tab==='calendar'?'月曆':tab==='settings'?'設定':draft.editing?'編輯':'新增';
@@ -218,7 +239,7 @@ function Main(){
     <KeyboardAvoidingView style={s.flex} behavior={Platform.OS==='ios'?'padding':undefined}>
       <ScrollView ref={scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
         {tab==='home'&&<>
-          <View style={[s.row,{justifyContent:'space-between',alignItems:'flex-end',marginBottom:14}]}><View><Text style={[s.heading,{marginBottom:2}]}>今天</Text><Text style={s.caption}>{new Date().toLocaleDateString('zh-TW',{month:'long',day:'numeric',weekday:'long'})}</Text></View></View>
+          <View style={[s.row,{justifyContent:'space-between',alignItems:'center',marginBottom:14}]}><View><Text style={[s.heading,{marginBottom:2}]}>今天</Text><Text style={s.caption}>{displayDay(new Date())}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="新增行程或待辦" onPress={startManual} style={{height:40,paddingHorizontal:13,borderRadius:14,backgroundColor:p.green,flexDirection:'row',alignItems:'center',gap:4}}><Icon name="add" size={18} color="white"/><Text style={{fontSize:13,fontWeight:'800',color:'white'}}>新增</Text></Pressable></View>
           {Platform.OS==='android'&&!listenerEnabled&&<Pressable onPress={()=>void enableAuto()} style={[s.card,{paddingVertical:14}]}><View style={s.row}><View style={s.categoryDot}><Icon name="notifications-outline"/></View><View style={s.flex}><Text style={s.cardTitle}>選擇監聽 App</Text><Text style={s.caption}>只有勾選的 App 才會被讀取</Text></View><Text style={{color:p.green,fontWeight:'700'}}>設定</Text></View></Pressable>}
           {todos.length>0&&<><Text style={s.sectionTitle}>待辦</Text>{todos.map(todoRow)}</>}
           {needsReview.length>0&&<><Text style={s.sectionTitle}>待確認</Text>{needsReview.map(card)}</>}
@@ -241,27 +262,21 @@ function Main(){
           <Button label={draft.editing?'儲存':draftIsTodo?'加入待辦':'加入行程'} disabled={busy} onPress={save}/>
         </>}
 
-        {tab==='settings'&&<>
-          <Text style={[s.heading,{marginBottom:16}]}>設定</Text>
-          {Platform.OS==='android'&&<Pressable accessibilityRole="button" onPress={()=>void enableAuto()} style={s.card}><SettingRow icon="apps-outline" title="監聽的 App" subtitle={listenerEnabled?'已啟用白名單':'選擇要監聽的 App'} action={<Icon name="chevron-forward" color={p.muted}/>}/></Pressable>}
-          <View style={s.card}><SettingRow icon="sparkles-outline" title="AI 辨識" subtitle={aiConfig.enabled?'已開啟':'關閉'} action={<Switch value={aiConfig.enabled} onValueChange={()=>void toggleAi()}/>}/>{showAiKey||(!aiHasKey&&!aiConfig.enabled)?<><Field label="OpenAI API key" value={aiKeyDraft} onChange={setAiKeyDraft} secure max={220} placeholder="貼上新的 sk-... key"/><Button label="儲存並開啟 AI" onPress={saveAiKey}/></>:null}</View>
-          {Platform.OS==='android'&&<View style={s.card}><SettingRow icon="calendar-outline" title="同步手機行事曆" subtitle={autoCalendar?'已開啟':'關閉'} action={<Switch value={autoCalendar} onValueChange={()=>void toggleAutoCalendar()}/>}/></View>}
-          {Platform.OS==='android'&&<Pressable accessibilityRole="button" onPress={()=>void setupQuickCapture()} style={s.card}><SettingRow icon="flash-outline" title="快速擷取" subtitle="加入 Android 快速設定" action={<Icon name="chevron-forward" color={p.muted}/>}/></Pressable>}
-          <Pressable accessibilityRole="button" onPress={()=>setDataMore(v=>!v)} style={s.card}><SettingRow icon="shield-checkmark-outline" title="資料與隱私" subtitle="備份、API key、刪除資料" action={<Icon name={dataMore?'chevron-up':'chevron-down'} color={p.muted}/>}/></Pressable>
-          {dataMore&&<View style={s.card}><Button label="匯出備份" secondary onPress={()=>void run(()=>api.exportBackup(live.current))}/><Button label="還原備份" secondary onPress={restore}/><Button label="隱私權說明" secondary onPress={()=>setPolicy(true)}/>{aiHasKey&&<Button label="移除 API key" secondary onPress={()=>void run(async()=>{await api.clearOpenAiKey();setAiHasKey(false);setAiConfig(await api.getAiSettings());setShowAiKey(false)})}/>}<Text style={[s.caption,{textAlign:'center',marginVertical:8}]}>版本 1.4.3</Text><Button label="刪除全部資料" danger onPress={()=>void run(async()=>{if(await confirm('永久刪除這台裝置的全部資料？')){api.clearDetectedNotifications();await api.erase();const next={...EMPTY,members:['我'],notices:[],welcomed:true};live.current=next;setData(next);setSelected(null);setTab('home')}})}/></View>}
-        </>}
+        {tab==='settings'&&<SettingsPanel data={data} onChange={refreshSettings} onRestore={restore} onPrivacy={()=>setPolicy(true)} onErase={()=>void run(async()=>{if(await confirm('永久刪除這台裝置的全部資料？')){api.clearDetectedNotifications();await api.erase();const next={...EMPTY,members:['我'],notices:[],welcomed:true};live.current=next;setData(next);setSelected(null);setTab('home');await refreshSettings();}})}/>}
+
       </ScrollView>
     </KeyboardAvoidingView>
 
-    {tab!=='manual'&&<><Pressable accessibilityRole="button" accessibilityLabel="新增" onPress={startManual} style={{position:'absolute',right:20,bottom:82,width:56,height:56,borderRadius:18,backgroundColor:p.green,alignItems:'center',justifyContent:'center',shadowColor:'#173B34',shadowOpacity:.2,shadowRadius:12,shadowOffset:{width:0,height:5},elevation:7}}><Icon name="add" size={28} color="white"/></Pressable><SafeAreaView edges={['bottom']} style={s.bottom}><View style={s.tabs}>{([['home','今天','today-outline'],['calendar','月曆','calendar-outline'],['settings','設定','settings-outline']] as const).map(([key,label,icon])=><Pressable key={key} accessibilityRole="tab" accessibilityState={{selected:tab===key}} onPress={()=>setTab(key)} style={s.tab}><Icon name={icon} color={tab===key?p.green:p.muted} size={23}/><Text style={[s.tabText,tab===key&&{color:p.green,fontWeight:'700'}]}>{label}</Text></Pressable>)}</View></SafeAreaView></>}
+    {tab!=='manual'&&<SafeAreaView edges={['bottom']} style={s.bottom}><View style={s.tabs}>{([['home','今天','today-outline'],['calendar','月曆','calendar-outline'],['settings','設定','settings-outline']] as const).map(([key,label,icon])=><Pressable key={key} accessibilityRole="tab" accessibilityState={{selected:tab===key}} onPress={()=>setTab(key)} style={s.tab}><Icon name={icon} color={tab===key?p.green:p.muted} size={23}/><Text style={[s.tabText,tab===key&&{color:p.green,fontWeight:'700'}]}>{label}</Text></Pressable>)}</View></SafeAreaView>}
 
     <Modal visible={!!notice} onRequestClose={()=>setSelected(null)} animationType="slide"><SafeAreaView style={s.root}><View style={s.modalBar}><Pressable onPress={()=>setSelected(null)} style={s.row}><Icon name="chevron-back"/><Text style={s.brand}>返回</Text></Pressable></View>{notice&&<ScrollView contentContainerStyle={s.content}>
       {notice.needsReview&&<Text style={s.warning}>這則內容需要確認</Text>}
-      <Text style={[s.heading,{marginBottom:8}]}>{notice.title}</Text><Text style={s.detailDate}>{whenLabel(notice)}{notice.endAt?` ～ ${whenLabel({...notice,dueAt:notice.endAt})}`:''}</Text>{notice.location&&<Text style={s.body}>📍 {notice.location}</Text>}
+      <Text style={[s.heading,{marginBottom:8}]}>{notice.title}</Text><Text style={s.detailDate}>{whenLabel(notice)}{notice.endAt?` ～ ${whenLabel({...notice,dueAt:notice.endAt})}`:''}</Text>{displayLocation(notice.location)&&<Text style={s.body}>📍 {displayLocation(notice.location)}</Text>}{noticeMapUrl&&<Pressable accessibilityRole="link" onPress={()=>void Linking.openURL(noticeMapUrl).catch(()=>notify('無法開啟 Google Maps。'))} style={[s.chip,{alignSelf:'flex-start',flexDirection:'row',alignItems:'center',gap:7,marginTop:8}]}><Icon name="navigate-outline" size={17}/><Text style={[s.chipText,{color:p.green,fontWeight:'700'}]}>在 Google Maps 開啟</Text></Pressable>}{noticeWebLinks.length>0&&<View style={s.chips}>{noticeWebLinks.map(url=><Pressable key={url} accessibilityRole="link" onPress={()=>void Linking.openURL(url).catch(()=>notify('無法開啟連結。'))} style={[s.chip,{flexDirection:'row',alignItems:'center',gap:7}]}><Icon name="link-outline" size={16}/><Text style={s.chipText}>開啟 {linkHost(url)}</Text></Pressable>)}</View>}
+      {notice.replySuggestions?.length&&canReplyToNotification(notice.source)&&<><Text style={s.sectionTitle}>快速回覆</Text><View style={s.chips}>{notice.replySuggestions.map(reply=><Pressable key={reply} accessibilityRole="button" onPress={()=>void run(async()=>{await replyToNotification(notice.source,reply);notify('已回覆。')})} style={s.chip}><Text style={s.chipText}>{reply}</Text></Pressable>)}</View></>}
       {notice.checklist.length>0&&<>{notice.checklist.map(c=><Pressable key={c.id} accessibilityRole="checkbox" accessibilityState={{checked:c.done}} style={s.checkRow} onPress={()=>void run(async()=>commit({...live.current,notices:live.current.notices.map(n=>n.id===notice.id?updateNotice(n,{checklist:n.checklist.map(x=>x.id===c.id?{...x,done:!x.done}:x)}):n)}))}><Icon name={c.done?'checkbox':'square-outline'}/><Text style={[s.body,s.flex,c.done&&{textDecorationLine:'line-through',color:p.muted}]}>{c.text}</Text></Pressable>)}</>}
-      <Button label={!notice.dueAt?'完成並移除':notice.done?'重新開啟':'完成'} onPress={()=>notice.dueAt?toggle(notice):completeAndClose(notice)}/><View style={s.row}><View style={s.flex}><Button label="編輯" secondary onPress={()=>edit(notice)}/></View>{notice.dueAt&&<View style={s.flex}><Button label="加入行事曆" secondary onPress={()=>void run(async()=>{if(Platform.OS==='android'){if(!autoCalendar){const ok=await api.setAutoCalendarEnabled(true);setAutoCalendar(ok);if(!ok)throw new Error('沒有取得行事曆權限。')}await api.addToSystemCalendar(notice,`manual-${notice.id}`);notify('已加入行事曆。')}else await api.exportCalendar(notice)})}/></View>}</View>
+      {!notice.dueAt&&<Button label="標記待辦已完成" onPress={()=>completeAndClose(notice)}/>}<View style={s.row}><View style={s.flex}><Button label="編輯" secondary onPress={()=>edit(notice)}/></View>{notice.dueAt&&<View style={s.flex}><Button label="加入行事曆" secondary onPress={()=>void run(async()=>{if(Platform.OS==='android'){if(!autoCalendar){const ok=await api.setAutoCalendarEnabled(true);setAutoCalendar(ok);if(!ok)throw new Error('沒有取得行事曆權限。')}await api.addToSystemCalendar(notice,`manual-${notice.id}`);notify('已加入行事曆。')}else await api.exportCalendar(notice)})}/></View>}</View>
       <Pressable onPress={()=>setDetailMore(v=>!v)} style={[s.card,{marginTop:12,paddingVertical:13}]}><View style={s.row}><Text style={[s.cardTitle,s.flex,{marginBottom:0}]}>更多</Text><Icon name={detailMore?'chevron-up':'chevron-down'} color={p.muted}/></View></Pressable>
-      {detailMore&&<><Button label="分享" secondary onPress={()=>void run(()=>api.shareNotice(notice))}/>{notice.source?<><Text style={s.sectionTitle}>原始內容</Text><Text selectable style={s.sourceText}>{stripDetectedId(notice.source)}</Text></>:null}{notice.sourceImage&&<Image source={{uri:notice.sourceImage}} style={s.sourceFull} resizeMode="contain"/>}<Button label="刪除" danger onPress={()=>remove(notice)}/></>}
+      {detailMore&&<>{notice.dueAt&&<Button label={notice.done?'恢復為未完成':'標記已完成'} secondary onPress={()=>toggle(notice)}/>}<Button label="分享" secondary onPress={()=>void run(()=>api.shareNotice(notice))}/>{notice.source?<><Text style={s.sectionTitle}>原始內容</Text><Text selectable style={s.sourceText}>{stripDetectedId(notice.source)}</Text></>:null}{notice.sourceImage&&<Image source={{uri:notice.sourceImage}} style={s.sourceFull} resizeMode="contain"/>}<Button label="刪除" danger onPress={()=>remove(notice)}/></>}
     </ScrollView>}</SafeAreaView></Modal>
 
     <Modal visible={!data.welcomed&&!policy} animationType="fade" onRequestClose={()=>{}}><SafeAreaView style={s.root}><View style={[s.content,{flex:1,justifyContent:'center'}]}><View style={s.welcomeIcon}><Icon name="calendar-outline" size={44} color="white"/></View><Text style={s.heading}>整理重要通知</Text><Text style={[s.body,{marginBottom:22}]}>{Platform.OS==='android'?'先選擇要監聽的 App。只有你勾選的 App 才會被讀取；有時間的內容變行程，沒有期限的任務變待辦。':'iPhone 版可用截圖或貼上文字建立行程與待辦。'}</Text>{Platform.OS==='android'?<Button label="選擇監聽 App" onPress={()=>void run(async()=>{await commit({...live.current,welcomed:true});await api.notificationAccess(true);api.openNotificationListenerSettings()})}/>:<Button label="開始使用" onPress={()=>void run(()=>commit({...live.current,welcomed:true}))}/>}<Button label="稍後" secondary onPress={()=>void run(()=>commit({...live.current,welcomed:true}))}/><Pressable onPress={()=>setPolicy(true)}><Text style={[s.caption,{textAlign:'center',padding:12}]}>隱私權說明</Text></Pressable></View></SafeAreaView></Modal>

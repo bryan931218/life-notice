@@ -57,6 +57,8 @@ class NoticeListenerModule : Module() {
     Name("NoticeListener")
 
     Function("isEnabled") { enabled() }
+    Function("hasListenerPermission") { listenerPermissionEnabled() }
+    Function("getMonitoredCount") { appContext.reactContext?.let { AppMonitorStore.selected(it).size } ?: 0 }
 
     Function("openSettings") {
       val context = appContext.reactContext ?: return@Function null

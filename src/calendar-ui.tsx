@@ -1,15 +1,15 @@
 import React,{useMemo,useState} from 'react';
 import {Pressable,StyleSheet,Text,View} from 'react-native';
 import type {Category,Notice} from './domain';
-import {dayKey,monthGrid,monthTitle,noticesForDay,shiftMonth} from './calendar';
+import {dayKey,displayDay,displayTime,monthGrid,monthTitle,noticesForDay,shiftMonth} from './calendar';
 import {Icon,p} from './ui';
 
 const WEEK=['日','一','二','三','四','五','六'];
 const catColor:Record<Category,string>={生活:'#3E8E79',學校:'#5271D9',帳單:'#D78134',取件:'#7C69C8',活動:'#CB5E72'};
 const catSoft:Record<Category,string>={生活:'#EAF6F1',學校:'#EDF0FF',帳單:'#FFF3E5',取件:'#F1EEFC',活動:'#FBECEF'};
-const timeLabel=(n:Notice)=>!n.dueAt?'':n.allDay?'全天':new Date(n.dueAt).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',hour12:false});
-const prettyDay=(key:string)=>new Date(`${key}T12:00:00`).toLocaleDateString('zh-TW',{month:'long',day:'numeric',weekday:'long'});
-const shortDate=(key:string)=>new Date(`${key}T12:00:00`).toLocaleDateString('zh-TW',{month:'numeric',day:'numeric'});
+const timeLabel=(n:Notice)=>!n.dueAt?'':n.allDay?'全天':displayTime(new Date(n.dueAt));
+const prettyDay=(key:string)=>displayDay(new Date(`${key}T12:00:00`));
+const shortDate=(key:string)=>`${Number(key.slice(5,7))}/${Number(key.slice(8,10))}`;
 
 export function MonthCalendar({notices,onOpen,onAdd}:{notices:Notice[];onOpen:(id:string)=>void;onAdd:(date:string)=>void}){
   const now=new Date();

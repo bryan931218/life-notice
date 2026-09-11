@@ -6,7 +6,10 @@ export const dayKey=(value:Date|string|number)=>{
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
 };
 
-export const monthTitle=(month:Date)=>month.toLocaleDateString('zh-TW',{year:'numeric',month:'long'});
+export const monthTitle=(month:Date)=>`${month.getFullYear()}年${month.getMonth()+1}月`;
+// Device locale data can fall back to English even when zh-TW is requested.
+export const displayDay=(date:Date)=>`${date.getMonth()+1}月${date.getDate()}日 星期${'日一二三四五六'[date.getDay()]}`;
+export const displayTime=(date:Date)=>`${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
 
 export function monthGrid(month:Date):Date[]{
   const first=new Date(month.getFullYear(),month.getMonth(),1);
