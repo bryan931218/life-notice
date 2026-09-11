@@ -45,6 +45,9 @@ jobs:
       - name: Apply Maps and URL migration
         run: node scripts/apply-link-migration.cjs
 
+      - name: Apply Gmail false-positive filtering
+        run: node scripts/apply-v152-gmail-filter.cjs
+
       - name: Ensure generated assets
         shell: bash
         run: |
@@ -75,17 +78,17 @@ jobs:
       - name: Prepare packages
         shell: bash
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.aab
-          sha256sum life-notice-v1.5.apk life-notice-v1.5.aab > SHA256SUMS.txt
+          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.2.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.2.aab
+          sha256sum life-notice-v1.5.2.apk life-notice-v1.5.2.aab > SHA256SUMS.txt
 
       - name: Upload Android packages
         uses: actions/upload-artifact@v4
         with:
-          name: life-notice-v1.5-android
+          name: life-notice-v1.5.2-android
           path: |
-            life-notice-v1.5.apk
-            life-notice-v1.5.aab
+            life-notice-v1.5.2.apk
+            life-notice-v1.5.2.aab
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -96,11 +99,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="v15-preview-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" life-notice-v1.5.apk SHA256SUMS.txt \
+          TAG="v152-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v1.5.2.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" \
-            --title "生活通知管家 v1.5 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.5.1：多則聊天上下文、Google Maps 短網址解析地點名稱、行程內可直接開啟 Google Maps/原始網址、較少無謂時間確認、AI 快速回覆，以及 Messenger/LINE 原始通知點按回覆。AI 不會自動替使用者傳訊息。"
+            --title "生活通知管家 v1.5.2 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.5.2：Gmail 嚴格過濾。群組摘要、全校/系統公告、條件式資訊、軟體授權到期等不再直接視為行程；Gmail 僅在明確個人行動或個人會議/預約時交給 AI，AI 不可用時不再退回寬鬆本機規則。保留 v1.5.1 的多則聊天上下文、Google Maps 地點與快速回覆。"
 
       - name: Persist migrated v1.5 source
         shell: bash
@@ -109,12 +112,15 @@ jobs:
           PATHS=(
             src/App.tsx
             src/domain.ts
+            src/ai.ts
+            src/services.ts
+            src/gmail-filter.ts
             modules/notice-listener/android/src/main/java/expo/modules/noticelistener/LifeNoticeListenerService.kt
           )
           if ! git diff --quiet -- "${PATHS[@]}"; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add "${PATHS[@]}"
-            git commit -m "Materialize v1.5.1 smart links UI"
+            git commit -m "Materialize v1.5.2 Gmail filtering"
             git push origin HEAD:v14-build
           fi
