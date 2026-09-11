@@ -1,5 +1,5 @@
 Life Notice v1.5 build ready
-version=1.5.1-smart-location-links
+version=1.5.2-gmail-strict-filter
 model=gpt-5.6-luna
 AI_KEY_EMBEDDED=false
 quiet-default=important
@@ -12,6 +12,7 @@ pending-context=keep-latest-overlapping-snapshot-only
 maps=resolve-short-url+extract-place-name+clickable-google-maps
 web-links=clickable-from-event-detail
 messenger=relative-time+daypart+casual-plan+remoteinput-direct-reply
+gmail=drop-group-summary+broadcast-info+license-expiry+ai-required-no-local-fallback
 ai-tools=create-calendar+create-todo+update+cancel+complete+ask+ignore+suggest-replies
 reply=explicit-user-tap-only
-retry=12
+retry=13
