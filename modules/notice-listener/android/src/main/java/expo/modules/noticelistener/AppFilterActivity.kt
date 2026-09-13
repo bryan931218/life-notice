@@ -17,8 +17,8 @@ import android.view.View
 import android.widget.*
 
 class AppFilterActivity:Activity(){
- private val green=Color.rgb(14,112,89)
- private val ink=Color.rgb(23,51,47)
+ private val green=Color.rgb(39,94,78)
+ private val ink=Color.rgb(34,60,53)
  private val muted=Color.rgb(107,126,121)
  private val selected=linkedSetOf<String>()
  private var original=setOf<String>()
@@ -33,9 +33,9 @@ class AppFilterActivity:Activity(){
  private data class App(val pkg:String,val label:String,val icon:android.graphics.drawable.Drawable?)
  private var apps=listOf<App>()
  private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
- private fun shape(color:Int,radius:Int=14)=GradientDrawable().apply{setColor(color);cornerRadius=dp(radius).toFloat()}
+ private fun shape(color:Int,radius:Int=20)=GradientDrawable().apply{setColor(color);cornerRadius=dp(radius).toFloat()}
  private fun text(value:String,size:Float=15f,color:Int=ink)=TextView(this).apply{text=value;textSize=size;setTextColor(color)}
- private fun button(value:String,primary:Boolean=false)=Button(this).apply{text=value;isAllCaps=false;textSize=14f;setTextColor(if(primary)Color.WHITE else green);background=shape(if(primary)green else Color.rgb(232,246,240));stateListAnimator=null;elevation=0f;minHeight=dp(48)}
+ private fun button(value:String,primary:Boolean=false)=Button(this).apply{text=value;isAllCaps=false;textSize=14f;setTextColor(if(primary)Color.WHITE else green);background=shape(if(primary)green else Color.rgb(232,238,226));stateListAnimator=null;elevation=0f;minHeight=dp(48)}
  private fun permitted():Boolean {
   val expected=ComponentName(this,LifeNoticeListenerService::class.java)
   return (Settings.Secure.getString(contentResolver,"enabled_notification_listeners")?:"").split(":").mapNotNull(ComponentName::unflattenFromString).any{it==expected}
@@ -45,7 +45,7 @@ class AppFilterActivity:Activity(){
   if(android.os.Build.VERSION.SDK_INT>=33)onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT){leave()}
   @Suppress("DEPRECATION") window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
   onlySelected=state?.getBoolean("filter")?:false;query=state?.getString("query")?:""
-  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(Color.rgb(248,250,249));setPadding(dp(20),dp(12),dp(20),dp(12))}
+  val root=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(Color.rgb(247,245,239));setPadding(dp(20),dp(12),dp(20),dp(12))}
   root.setOnApplyWindowInsetsListener { view,insets ->
    @Suppress("DEPRECATION") view.setPadding(dp(20),dp(12)+insets.systemWindowInsetTop,dp(20),dp(12)+insets.systemWindowInsetBottom)
    insets

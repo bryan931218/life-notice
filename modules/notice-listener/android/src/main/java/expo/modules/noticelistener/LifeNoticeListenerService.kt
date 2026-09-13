@@ -174,14 +174,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val exact = active.firstOrNull { it.key == target.notificationKey }
     if (exact != null) return replyInputs(exact.notification)
 
-    val fallback = active
-      .filter { it.packageName == target.packageName }
-      .sortedByDescending { it.postTime }
-      .firstOrNull { sbn ->
-        val (activeTitle, _) = extract(sbn.notification)
-        target.title.isBlank() || activeTitle == target.title
-      } ?: return null
-    return replyInputs(fallback.notification)
+    return null
   }
 
   private fun sendReply(context: Context, noticeId: String, text: String): Boolean {
@@ -242,6 +235,6 @@ class LifeNoticeListenerService : NotificationListenerService() {
       .setCategory(Notification.CATEGORY_REMINDER)
       .setContentIntent(pending)
       .addAction(0, "加入行事曆", capturePending)
-    manager.notify(item.id.hashCode(), builder.build())
+    runCatching { manager.notify(item.id.hashCode(), builder.build()) }
   }
 }

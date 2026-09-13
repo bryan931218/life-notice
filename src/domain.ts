@@ -1,3 +1,4 @@
+import {resolveDateText} from './date-resolver.ts';
 export type Category = '生活' | '學校' | '帳單' | '取件' | '活動';
 export type Importance = 'normal' | 'important' | 'urgent';
 export type CheckItem = { id: string; text: string; done: boolean };
@@ -14,10 +15,11 @@ export const CATEGORIES: Category[] = ['生活', '學校', '帳單', '取件', '
 export const id = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 export function parseDate(date: string, time: string): string | null {
   if (!date.trim() && !time.trim()) return null;
+  if (!date.trim() && time.trim()) throw new Error('填寫時間時也需要日期。');
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
-  const h = /^(\d{2}):(\d{2})$/.exec(time.trim());
-  if (!m || !h) throw new Error('日期請填 YYYY-MM-DD，時間請填 HH:mm。');
-  const [year, month, day] = m.slice(1).map(Number); const [hour, minute] = h.slice(1).map(Number);
+  const h = time.trim() ? /^(\d{2}):(\d{2})$/.exec(time.trim()) : null;
+  if (!m || (time.trim() && !h)) throw new Error('日期請填 YYYY-MM-DD，時間請填 HH:mm；時間留空會建立全天行程。');
+  const [year, month, day] = m.slice(1).map(Number); const [hour, minute] = h ? h.slice(1).map(Number) : [0, 0];
   const d = new Date(year, month - 1, day, hour, minute);
   if (year < 2000 || year > 2100 || d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day || hour > 23 || minute > 59) throw new Error('日期或時間不存在，請重新確認。');
   return d.toISOString();
@@ -180,6 +182,8 @@ export function inferNotice(source: string, now = new Date()): Inference {
       let score=0;
       if(ACTION_WORDS.test(line))score+=9;
       if(DATE_CONTEXT.test(line))score+=6;
+      if(/回診|看診|牙醫|面試|開會|會議|聚餐|出遊|旅行|演唱會|校外教學/.test(line))score+=15;
+      if(/^(?:請|記得|務必)?\s*(?:帶|攜帶|準備)/.test(line))score-=8;
       if(/[!！?？]$/.test(line))score+=1;
       if(line.length>=6&&line.length<=45)score+=4;
       if(line.length>70)score-=4;
@@ -223,64 +227,19 @@ export function inferNotice(source: string, now = new Date()): Inference {
 }
 
 export function inferLiveNotification(source:string, receivedAt:number|Date = Date.now()):Inference {
-  const base = receivedAt instanceof Date ? receivedAt : new Date(receivedAt);
-  const inferred = inferNotice(source, base);
-  if (inferred.date) return inferred;
-
-  const text = normalizeNoticeText(source);
-  const match = text.match(/今天|今晚|明天|明晚|後天|大後天|這週|本週|下週|下星期|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]/);
-  if (!match) return inferred;
-
-  const d = new Date(base.getFullYear(), base.getMonth(), base.getDate());
-  const token = match[0];
-  if (token === '明天' || token === '明晚') d.setDate(d.getDate()+1);
-  else if (token === '後天') d.setDate(d.getDate()+2);
-  else if (token === '大後天') d.setDate(d.getDate()+3);
-  else if (/^(週|星期|禮拜)/.test(token)) {
-    const names = '日一二三四五六';
-    const char = token[token.length-1] === '天' ? '日' : token[token.length-1];
-    const target = names.indexOf(char);
-    let delta = (target - d.getDay() + 7) % 7;
-    if (delta === 0) delta = 7;
-    d.setDate(d.getDate()+delta);
-  } else if (/下週|下星期/.test(token)) {
-    d.setDate(d.getDate() + (7 - d.getDay()) + 1);
-  }
-
-  const date = displayDate(d.getFullYear(), d.getMonth()+1, d.getDate());
-  let time = inferred.time;
-  if (!time) {
-    const tm = text.match(/(上午|早上|中午|下午|晚上|晚間|凌晨)?\s*(\d{1,2})\s*([:：點時])\s*(\d{1,2})?\s*(?:分)?/);
-    if (tm) {
-      let hour = Number(tm[2]);
-      const minute = Number(tm[4] ?? 0);
-      const part = tm[1] ?? '';
-      if (/下午|晚上|晚間/.test(part) && hour < 12) hour += 12;
-      if (part === '中午' && hour < 11) hour += 12;
-      if (/上午|早上/.test(part) && hour === 12) hour = 0;
-      if (part === '凌晨' && hour === 12) hour = 0;
-      if (hour <= 23 && minute <= 59) time = `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
-    }
-  }
-  if (!time) time = '23:59';
-
-  return {
-    ...inferred,
-    date,
-    time,
-    warnings: inferred.warnings.filter(w=>!w.includes('相對日期')).concat(time==='23:59' ? ['通知提到相對日期但沒有明確時間，先放在當天 23:59，請點開確認。'] : []),
-    evidence: [...inferred.evidence, `即時通知時間：${token}（以收到通知的時間換算）`],
-    confidence: inferred.confidence === '低' ? '中' : inferred.confidence,
-    actionable: true,
-  };
+  const current=receivedAt instanceof Date?receivedAt:new Date(receivedAt);
+  const result=inferNotice(source,current),resolved=resolveDateText(source,current);
+  return {...result,date:resolved.date,time:resolved.time,warnings:resolved.warnings,actionable:result.actionable||!!resolved.date,evidence:[...result.evidence,'依手機本地日期與時間換算']};
 }
 
 export function updateNotice(old: Notice, patch: Partial<Notice>, at = new Date().toISOString()): Notice {
+  // Keep the original context and the newest update without growing beyond backup limits.
+  if(patch.source&&patch.source.length>20000)patch={...patch,source:patch.source.slice(0,9000)+'\n…\n'+patch.source.slice(-10000)};
   const changed = patch.title !== undefined && patch.title !== old.title || patch.dueAt !== undefined && patch.dueAt !== old.dueAt || patch.endAt !== undefined && patch.endAt !== old.endAt || patch.location !== undefined && patch.location !== old.location || patch.source !== undefined && patch.source !== old.source;
   return { ...old, ...patch, id: old.id, createdAt: old.createdAt, updatedAt: at, history: changed ? [{ at, title: old.title, dueAt: old.dueAt, source: old.source }, ...old.history].slice(0,20) : old.history };
 }
 export function reminderPlan(notices: Notice[], now = Date.now()) {
-  return notices.filter(n => !n.done && n.dueAt && n.remindMinutes !== null).map(n => ({ id: n.id, title: n.title, at: new Date(n.dueAt!).getTime() - n.remindMinutes! * 60000 })).filter(n => n.at > now).sort((a,b) => a.at-b.at).slice(0,40);
+  return notices.filter(n => !n.done && !n.needsReview && n.dueAt && n.remindMinutes !== null).map(n => ({ id: n.id, title: n.title, at: new Date(n.dueAt!).getTime() - n.remindMinutes! * 60000 })).filter(n => n.at > now).sort((a,b) => a.at-b.at).slice(0,40);
 }
 export function validateBackup(value: unknown): State {
   const s = value as State;
@@ -288,9 +247,10 @@ export function validateBackup(value: unknown): State {
   if (!s.members.every(m => typeof m === 'string' && m.trim().length > 0 && m.length <= 30)) throw new Error('成員資料不正確。');
   const ids = new Set<string>();
   for (const n of s.notices) {
-    if (!n || typeof n.id !== 'string' || n.id.length > 100 || ids.has(n.id) || typeof n.title !== 'string' || !n.title.trim() || n.title.length > 100 || typeof n.source !== 'string' || n.source.length > 20000 || !CATEGORIES.includes(n.category) || typeof n.assignee !== 'string' || n.assignee.length > 30 || typeof n.done !== 'boolean' || !Array.isArray(n.checklist) || n.checklist.length > 50 || !Array.isArray(n.history) || n.history.length > 20 || !(n.dueAt === null || typeof n.dueAt === 'string' && Number.isFinite(Date.parse(n.dueAt))) || !(n.endAt === undefined || n.endAt === null || typeof n.endAt === 'string' && Number.isFinite(Date.parse(n.endAt))) || !(n.location === undefined || typeof n.location === 'string' && n.location.length <= 200) || !(n.needsReview === undefined || typeof n.needsReview === 'boolean') || !(n.aiConfidence === undefined || typeof n.aiConfidence === 'number' && n.aiConfidence >= 0 && n.aiConfidence <= 1) || !(n.importance === undefined || ['normal','important','urgent'].includes(n.importance)) || !(n.replySuggestions === undefined || Array.isArray(n.replySuggestions) && n.replySuggestions.length <= 3 && n.replySuggestions.every(r => typeof r === 'string' && r.length > 0 && r.length <= 40)) || !(n.remindMinutes === null || Number.isInteger(n.remindMinutes) && n.remindMinutes >= 0 && n.remindMinutes <= 43200)) throw new Error('備份包含無效事項。');
+    if (!n || typeof n.id !== 'string' || !n.id || n.id.length > 100 || ids.has(n.id) || typeof n.title !== 'string' || !n.title.trim() || n.title.length > 100 || typeof n.source !== 'string' || n.source.length > 20000 || !CATEGORIES.includes(n.category) || typeof n.assignee !== 'string' || !n.assignee.trim() || n.assignee.length > 30 || typeof n.done !== 'boolean' || !Array.isArray(n.checklist) || n.checklist.length > 50 || !Array.isArray(n.history) || n.history.length > 20 || !(n.dueAt === null || typeof n.dueAt === 'string' && Number.isFinite(Date.parse(n.dueAt))) || !(n.endAt === undefined || n.endAt === null || typeof n.endAt === 'string' && Number.isFinite(Date.parse(n.endAt))) || !(n.allDay === undefined || typeof n.allDay === 'boolean') || !(n.location === undefined || typeof n.location === 'string' && n.location.length <= 500) || !(n.needsReview === undefined || typeof n.needsReview === 'boolean') || !(n.aiConfidence === undefined || typeof n.aiConfidence === 'number' && n.aiConfidence >= 0 && n.aiConfidence <= 1) || !(n.aiAction === undefined || typeof n.aiAction === 'string' && n.aiAction.length <= 240) || !(n.importance === undefined || ['normal','important','urgent'].includes(n.importance)) || !(n.replySuggestions === undefined || Array.isArray(n.replySuggestions) && n.replySuggestions.length <= 3 && n.replySuggestions.every(r => typeof r === 'string' && r.trim().length > 0 && r.length <= 40)) || !(n.remindMinutes === null || Number.isInteger(n.remindMinutes) && n.remindMinutes >= 0 && n.remindMinutes <= 43200)) throw new Error('備份包含無效事項。');
     for (const key of ['createdAt','updatedAt'] as const) if (typeof n[key] !== 'string' || !Number.isFinite(Date.parse(n[key]))) throw new Error('備份時間格式不正確。');
-    for (const c of n.checklist) if (!c || typeof c.id !== 'string' || typeof c.text !== 'string' || c.text.length > 200 || typeof c.done !== 'boolean') throw new Error('準備清單格式不正確。');
+    const checklistIds=new Set<string>();
+    for (const c of n.checklist) { if (!c || typeof c.id !== 'string' || !c.id || checklistIds.has(c.id) || typeof c.text !== 'string' || !c.text.trim() || c.text.length > 220 || typeof c.done !== 'boolean') throw new Error('準備清單格式不正確。'); checklistIds.add(c.id); }
     for (const h of n.history) if (!h || typeof h.at !== 'string' || !Number.isFinite(Date.parse(h.at)) || typeof h.title !== 'string' || h.title.length > 100 || typeof h.source !== 'string' || h.source.length > 20000 || !(h.dueAt === null || typeof h.dueAt === 'string' && Number.isFinite(Date.parse(h.dueAt)))) throw new Error('修改紀錄格式不正確。');
     ids.add(n.id);
   }
@@ -302,6 +262,9 @@ export function toCalendar(n: Notice): string {
   if (!n.dueAt) throw new Error('請先設定日期時間。');
   const esc = (s:string) => s.replace(/\\/g,'\\\\').replace(/\r?\n/g,'\\n').replace(/;/g,'\\;').replace(/,/g,'\\,');
   const utc = (d:string) => new Date(d).toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'');
+  const localDay = (d:string) => { const v=new Date(d); return `${v.getFullYear()}${String(v.getMonth()+1).padStart(2,'0')}${String(v.getDate()).padStart(2,'0')}`; };
   const fold = (s:string) => { let line='', result=''; for(const char of s) { if(new TextEncoder().encode(line+char).length>73){result+=line+'\r\n ';line='';}line+=char;}return result+line; };
-  return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Life Notice//ZH-TW','CALSCALE:GREGORIAN','BEGIN:VEVENT',`UID:${n.id}@life-notice.local`,`DTSTAMP:${utc(n.updatedAt)}`,`DTSTART:${utc(n.dueAt)}`,`DTEND:${utc(n.endAt&&Date.parse(n.endAt)>Date.parse(n.dueAt)?n.endAt:new Date(Date.parse(n.dueAt)+30*60000).toISOString())}`,`SUMMARY:${esc(n.title)}`,...(n.location?[`LOCATION:${esc(n.location)}`]:[]),`DESCRIPTION:${esc(n.source+'\n負責人：'+n.assignee+'\n'+n.checklist.map(c=>(c.done?'☑ ':'□ ')+c.text).join('\n'))}`,'END:VEVENT','END:VCALENDAR'].map(fold).join('\r\n')+'\r\n';
+  const nextDay=new Date(n.dueAt);nextDay.setDate(nextDay.getDate()+1);
+  const dates=n.allDay?[`DTSTART;VALUE=DATE:${localDay(n.dueAt)}`,`DTEND;VALUE=DATE:${localDay(n.endAt&&Date.parse(n.endAt)>Date.parse(n.dueAt)?n.endAt:nextDay.toISOString())}`]:[`DTSTART:${utc(n.dueAt)}`,`DTEND:${utc(n.endAt&&Date.parse(n.endAt)>Date.parse(n.dueAt)?n.endAt:new Date(Date.parse(n.dueAt)+30*60000).toISOString())}`];
+  return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Life Notice//ZH-TW','CALSCALE:GREGORIAN','BEGIN:VEVENT',`UID:${n.id}@life-notice.local`,`DTSTAMP:${utc(n.updatedAt)}`,...dates,`SUMMARY:${esc(n.title)}`,...(n.location?[`LOCATION:${esc(n.location)}`]:[]),`DESCRIPTION:${esc(n.source+'\n負責人：'+n.assignee+'\n'+n.checklist.map(c=>(c.done?'☑ ':'□ ')+c.text).join('\n'))}`,'END:VEVENT','END:VCALENDAR'].map(fold).join('\r\n')+'\r\n';
 }

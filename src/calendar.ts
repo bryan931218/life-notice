@@ -18,8 +18,8 @@ export function monthGrid(month:Date):Date[]{
   return Array.from({length:42},(_,i)=>new Date(start.getFullYear(),start.getMonth(),start.getDate()+i));
 }
 
-export function noticesForDay(notices:Notice[],key:string){
-  return notices.filter(n=>!n.done&&n.dueAt&&dayKey(n.dueAt)===key)
+export function noticesForDay(notices:Notice[],key:string,includeCompleted=false){
+  return notices.filter(n=>(includeCompleted||!n.done)&&n.dueAt&&dayKey(n.dueAt)<=key&&dayKey(n.endAt&&Date.parse(n.endAt)>Date.parse(n.dueAt)?Date.parse(n.endAt)-1:n.dueAt)>=key)
     .sort((a,b)=>Date.parse(a.dueAt!)-Date.parse(b.dueAt!));
 }
 
@@ -31,3 +31,14 @@ export function noticesForMonth(notices:Notice[],month:Date){
 }
 
 export function shiftMonth(month:Date,delta:number){return new Date(month.getFullYear(),month.getMonth()+delta,1);}
+
+export type HistoryFilter='all'|'completed'|'past';
+export function historyNotices(notices:Notice[],filter:HistoryFilter='all',query='',now=new Date()){
+  const today=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+  const term=query.trim().toLocaleLowerCase();
+  return notices.filter(n=>{
+    const past=!!n.dueAt&&Date.parse(n.endAt||n.dueAt)<today;
+    const matches=filter==='completed'?n.done:filter==='past'?past&&!n.done:n.done||past;
+    return matches&&(!term||[n.title,n.location??'',n.source].join('\n').toLocaleLowerCase().includes(term));
+  }).sort((a,b)=>Date.parse(b.dueAt||b.updatedAt)-Date.parse(a.dueAt||a.updatedAt)||a.id.localeCompare(b.id));
+}

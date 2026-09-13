@@ -61,22 +61,22 @@ jobs:
           set -euo pipefail
           chmod +x android/gradlew
           cd android
-          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+          ./gradlew :notice-listener:testDebugUnitTest :app:assembleRelease :app:bundleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Prepare packages
         shell: bash
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.4.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.4.aab
-          sha256sum life-notice-v1.5.4.apk life-notice-v1.5.4.aab > SHA256SUMS.txt
+          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.5.5.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.5.5.aab
+          sha256sum life-notice-v1.5.5.apk life-notice-v1.5.5.aab > SHA256SUMS.txt
 
       - name: Upload Android packages
         uses: actions/upload-artifact@v4
         with:
-          name: life-notice-v1.5.4-android
+          name: life-notice-v1.5.5-android
           path: |
-            life-notice-v1.5.4.apk
-            life-notice-v1.5.4.aab
+            life-notice-v1.5.5.apk
+            life-notice-v1.5.5.aab
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -87,8 +87,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="v154-preview-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" life-notice-v1.5.4.apk SHA256SUMS.txt \
+          TAG="v155-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v1.5.5.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" --prerelease \
-            --title "生活通知管家 v1.5.4 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.5.4 測試版：重新設計監聽 App 管理、搜尋與已選篩選；設定分組、提醒偏好保存、預設提醒、API 金鑰驗證及明確操作回饋。測試簽章，非商店正式版。"
+            --title "生活通知管家 v1.5.5 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.5.5 測試版：重新設計監聽 App 管理、搜尋與已選篩選；設定分組、提醒偏好保存、預設提醒、API 金鑰驗證及明確操作回饋。測試簽章，非商店正式版。"
