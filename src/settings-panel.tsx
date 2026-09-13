@@ -51,7 +51,7 @@ export function SettingsPanel({data,onChange,onRestore,onPrivacy,onErase}:{data:
    <Action title="隱私權說明" detail="了解本機資料、通知權限與 AI 的傳送範圍。" onPress={onPrivacy}/>
    <Action title="清除全部本機資料" detail="清除事件、圖片、金鑰及監聽設定；保留手機行事曆副本。" onPress={onErase}/>
   </Group>
-  <Text style={[s.caption,{textAlign:'center',marginVertical:22}]}>生活通知管家 1.5.5</Text>
+  <Text style={[s.caption,{textAlign:'center',marginVertical:22}]}>生活通知管家 1.5.7</Text>
  </>;
 }
 const styles=StyleSheet.create({group:{backgroundColor:'white',borderRadius:24,borderWidth:1,borderColor:p.border,marginBottom:12},row:{flexDirection:'row',alignItems:'center',gap:12,padding:16,minHeight:64},inside:{paddingHorizontal:16,paddingBottom:16},summary:{flexDirection:'row',alignItems:'center',gap:12,backgroundColor:p.mint,padding:16,borderRadius:18,marginBottom:22},dot:{width:10,height:10,borderRadius:5},feedback:{flexDirection:'row',alignItems:'center',gap:10,padding:12}});

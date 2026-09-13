@@ -12,6 +12,7 @@ for(const [text,date,time] of [
  ['2026/09/20 活動','2026-09-20',''],
  ['晚上10.開會','2026-09-12','22:00'],
  ['今天晚上7.30去星月廣場吃飯','2026-09-12','19:30'],
+ ['今天吃好吃的\n在星月廣場\n我們訂20：15','2026-09-12','20:15'],
  ['9/20 14:30 見面','2026-09-20','14:30'],
 ])test(text,()=>{const r=resolveDateText(text,base);assert.equal(r.date,date);assert.equal(r.time,time);assert.equal(r.needsReview,false)});
 for(const text of ['明天或後天開會','2026/02/30 14:00','2026/13/01 14:00','明天25:00','明天10:00或11:00'])test(`拒絕不確定時間：${text}`,()=>assert.equal(resolveDateText(text,base).needsReview,true));

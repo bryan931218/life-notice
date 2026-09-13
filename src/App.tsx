@@ -102,6 +102,7 @@ function Main(){
             if(old){
               const source=`${old.source}\n\n[AI 更正來源｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
               next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{title:decision.title??n.title,dueAt:decision.startAt??n.dueAt,endAt:decision.endAt??(decision.startAt?null:n.endAt),location:decision.location??n.location,remindMinutes:decision.reminderMinutes??n.remindMinutes,source,needsReview:decision.confidence<0.9,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance,replySuggestions:decision.replySuggestions}):n)};
+              const updatedNotice=next.notices.find(n=>n.id===old.id);if(updatedNotice)void api.notifyDetectionResult(updatedNotice,'updated').catch(()=>{});
               if(calendarEnabled&&decision.confidence>=0.9){const updated=next.notices.find(n=>n.id===old.id);if(updated?.dueAt)try{await api.addToSystemCalendar(updated)}catch{hadFailure=true;setImportIssue('App 內已更新，手機行事曆未能更新，請從詳情重試。')}}
               changed=true;processed.push(item.id);continue;
             }
@@ -111,6 +112,7 @@ function Main(){
             if(old){
               const source=`${old.source}\n\n[AI 狀態更新｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
               next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,source,needsReview:false,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.type==='cancel_existing_event'?decision.importance:n.importance,replySuggestions:decision.replySuggestions}):n)};
+              const finished=next.notices.find(n=>n.id===old.id);if(finished)void api.notifyDetectionResult(finished,decision.type==='cancel_existing_event'?'cancelled':'completed').catch(()=>{});
               changed=true;processed.push(item.id);continue;
             }
           }
@@ -127,6 +129,7 @@ function Main(){
         made={id:id(),title,source:`[自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,category:inferred.category,dueAt,allDay:!!dueAt&&!inferred.time,needsReview:sourcePolicy==='ai_required'||inferred.warnings.length>0||!dueAt&&!todo,assignee:'我',checklist:inferred.checklist.map(text=>({id:id(),text,done:false})),done:false,remindMinutes:dueAt&&item.score>=9?60:null,createdAt:new Date(item.receivedAt).toISOString(),updatedAt:new Date().toISOString(),history:[],importance:item.score>=12?'urgent':item.score>=9?'important':'normal'};
       }
       next={...next,notices:[made,...next.notices]};changed=true;
+      try{if(!await api.notifyDetectionResult(made,'created')){hadFailure=true;setImportIssue('行程已建立，但通知權限未開啟；請到設定允許通知。')}}catch{hadFailure=true;setImportIssue('行程已建立，但即時通知發送失敗；請到設定發送測試提醒。')}
       const trusted=made.dueAt&&!made.needsReview&&(made.aiConfidence!==undefined?made.aiConfidence>=0.9:item.score>=9);
       if(calendarEnabled&&trusted){try{await api.addToSystemCalendar(made,`detected-${item.id}`)}catch{hadFailure=true;setImportIssue('項目已保存在 App，但手機行事曆寫入失敗，請檢查行事曆權限及帳戶。')}}
       processed.push(item.id);

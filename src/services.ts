@@ -8,6 +8,7 @@ import {requireOptionalNativeModule} from 'expo-modules-core';
 import {EMPTY,reminderPlan,toCalendar,validateBackup,type State,type Notice} from './domain';
 import {dedupeAutoNotices} from './dedupe';
 import {GMAIL_PACKAGE,gmailNotificationPolicy} from './gmail-filter';
+import {isDefiniteJunkNotification,isHardSystemNoise} from './notification-filter';
 import type {AiModel} from './ai';
 const KEY='life-notice-v1';
 const AUTO_CALENDAR_KEY='life-notice-auto-calendar-v1';
@@ -19,7 +20,6 @@ export type AiSettings={enabled:boolean;model:AiModel};
 export type AlertLevel='important'|'balanced'|'all';
 const AUTO_SOURCE=/^\[(?:AI)?自動偵測｜/;
 const OBVIOUS_NOISE=/Samsung\s*Rewards|Rewards|獲得\s*\d+\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|驗證碼|認證碼|一次性密碼|\bOTP\b|verification\s*code|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞|推薦文章|每日精選|購物優惠|會員好康|#請益|數位城市迷彩/i;
-const HARD_NOISE=/節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|VPN|截圖已儲存|驗證碼|認證碼|一次性密碼|\bOTP\b|verification\s*code/i;
 
 export function isObviousNoiseText(text:string){return OBVIOUS_NOISE.test(text);}
 
@@ -36,9 +36,9 @@ export function getDetectedNotifications():DetectedNotification[]{
   const all=listener?.getDetected()??[];
   // Keep source-specific borderline items in the queue. App.tsx knows whether AI
   // mode is enabled and lets the model inspect them before deciding to ignore.
-  const ignored=all.filter(x=>HARD_NOISE.test(`${x.appName}\n${x.title}\n${x.text}`));
+  const ignored=all.filter(x=>isHardSystemNoise(`${x.appName}\n${x.title}\n${x.text}`)||isDefiniteJunkNotification(x));
   if(ignored.length)listener?.markProcessed(ignored.map(x=>x.id));
-  return all.filter(x=>!HARD_NOISE.test(`${x.appName}\n${x.title}\n${x.text}`));
+  return all.filter(x=>!isHardSystemNoise(`${x.appName}\n${x.title}\n${x.text}`)&&!isDefiniteJunkNotification(x));
 }
 export function markDetectedNotificationsProcessed(ids:string[]){listener?.markProcessed(ids);}
 export function clearDetectedNotifications(){listener?.clearDetected();}
@@ -122,6 +122,13 @@ export async function keepImage(uri:string):Promise<string>{if(Platform.OS==='we
 export async function removeImage(uri?:string){if(uri && FS.documentDirectory && uri.startsWith(FS.documentDirectory+'sources/'))await FS.deleteAsync(uri,{idempotent:true});}
 if(Platform.OS!=='web')Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})});
 export async function notificationAccess(request=false){if(Platform.OS==='web')return false;if(Platform.OS==='android')await Notifications.setNotificationChannelAsync('life-notices',{name:'行程提醒',importance:Notifications.AndroidImportance.HIGH});let p=await Notifications.getPermissionsAsync();if(!p.granted && request)p=await Notifications.requestPermissionsAsync();return p.granted || p.ios?.status===Notifications.IosAuthorizationStatus.PROVISIONAL;}
+export async function notifyDetectionResult(n:Notice,kind:'created'|'updated'|'cancelled'|'completed'='created'){
+ if(!(await notificationAccess(true)))return false;
+ const title=kind==='created'?'已建立新行程':kind==='updated'?'行程已更新':kind==='cancelled'?'行程已取消':'待辦已完成';
+ const when=n.dueAt?new Date(n.dueAt).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:n.allDay?undefined:'2-digit',minute:n.allDay?undefined:'2-digit'}):'時間待確認';
+ await Notifications.scheduleNotificationAsync({identifier:`detected-result-${kind}-${n.id}-${n.updatedAt}`,content:{title,body:`${n.title} · ${when}`,sound:'default',data:{noticeId:n.id}},trigger:{type:Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,seconds:1,channelId:'life-notices'}});
+ return true;
+}
 let queue=Promise.resolve();
 export function syncReminders(notices:Notice[],request=false):Promise<string>{let result='';const job=queue.then(async()=>{
   if(Platform.OS==='web'){result='網頁預覽不提供背景提醒。';return;}

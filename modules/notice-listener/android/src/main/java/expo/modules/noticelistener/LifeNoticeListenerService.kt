@@ -35,6 +35,17 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
     private val HARD_IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|VPN|截圖已儲存", RegexOption.IGNORE_CASE)
     private val IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|Samsung Rewards|Rewards|獲得\\s*\\d+\\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞", RegexOption.IGNORE_CASE)
+    private val EXPLICIT_AD = Regex("\\b(?:sponsored|advertisement)\\b|贊助內容|付費廣告|此為廣告", RegexOption.IGNORE_CASE)
+    private val SOCIAL_NOISE = Regex("按讚了你的|對你的.*表示|開始追蹤你|追蹤了你|查看了你的|新增了限時動態|發佈了新貼文|推薦你追蹤|你可能認識|liked your|started following|new post from", RegexOption.IGNORE_CASE)
+    private val NEWS_NOISE = Regex("熱門新聞|推薦文章|每日精選|焦點新聞|即時新聞|今日頭條|為你推薦")
+    private val PERSONAL = Regex("您的?(?:訂單|預約|訂位|掛號|航班|車次|包裹|帳單)|已(?:預約|訂位|報名|付款|繳費|出貨|到店|取件)|面試通知|錄取通知|會議邀請|行事曆邀請|付款期限|繳費期限")
+    private val SCHEDULE = Regex("(?:今天|今晚|明天|明晚|後天|週[一二三四五六日天]|星期[一二三四五六日天])[^\\n]{0,40}(?:\\d{1,2}\\s*[:：.．點時]|早上|上午|中午|下午|晚上|晚間)[^\\n]{0,50}(?:吃|去|見面|碰面|開會|會議|上課|考試|面試|看診|預約|訂位|打球|運動|集合|出發|要不要|一起)")
+    private val PROMO = listOf(
+      Regex("限時(?:優惠|特價|搶購)?"), Regex("優惠券|折價券|優惠碼|折扣碼"),
+      Regex("促銷|特價|下殺|買一送一|滿額|免運"), Regex("全館|全站|會員專屬|會員好康"),
+      Regex("立即(?:購買|下單|搶購|領取)|馬上(?:購買|下單|搶購)"), Regex("\\d+\\s*折|折抵\\s*\\d+|現省\\s*\\d+"),
+      Regex("購物優惠|新品上市|熱賣|開賣|最後倒數")
+    )
     private const val GMAIL_PACKAGE = "com.google.android.gm"
     private val GMAIL_SUMMARY = Regex("\\b\\d+\\s*封新郵件\\b|\\b\\d+\\s+new\\s+emails?\\b|new mail summary", RegexOption.IGNORE_CASE)
     private val GMAIL_BROADCAST = Regex("全校公告(?:信)?|校務公告|服務公告|系統公告|資訊技術服務中心|軍訓室[^\\n]{0,20}(?:公告|通知|注意事項)|電子報|newsletter|Adobe\\s+Creative\\s+Cloud|授權[^\\n]{0,20}到期", RegexOption.IGNORE_CASE)
@@ -85,6 +96,13 @@ class LifeNoticeListenerService : NotificationListenerService() {
         (hasDate && (hasTime || hasDaypart) && hasEvent)
     }
 
+    internal fun isDefiniteJunkText(text: String): Boolean {
+      if (PERSONAL.containsMatchIn(text) || SCHEDULE.containsMatchIn(text)) return false
+      if (EXPLICIT_AD.containsMatchIn(text) || SOCIAL_NOISE.containsMatchIn(text) || NEWS_NOISE.containsMatchIn(text)) return true
+      val hits = PROMO.count { it.containsMatchIn(text) }
+      return hits >= 3 || (hits >= 2 && Regex("立即|馬上|點擊|領取|購買|下單|搶購|查看詳情|前往").containsMatchIn(text))
+    }
+
     internal fun scoreText(text: String): Pair<Int, String> {
       var score = 0
       val reasons = mutableListOf<String>()
@@ -132,6 +150,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val currentText = listOf(title, body).filter { it.isNotBlank() }.distinct().joinToString("\n").trim()
     val aiEnabled = DetectedStore.aiMode(applicationContext)
     if (currentText.length < 3 || HARD_IGNORE.containsMatchIn(currentText)) return
+    if (aiEnabled && isDefiniteJunkText(currentText)) return
     if (!aiEnabled && IGNORE.containsMatchIn(currentText)) return
     if (sbn.packageName == GMAIL_PACKAGE) {
       if (GMAIL_SUMMARY.containsMatchIn(currentText)) return
@@ -177,7 +196,8 @@ class LifeNoticeListenerService : NotificationListenerService() {
 
     if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
     if (DetectedStore.add(applicationContext, item)) {
-      val addedToCalendar = DetectedStore.autoCalendar(applicationContext) && QuickCapture.capture(applicationContext, item).ok
+      // Recall-first AI candidates must be approved by the model before calendar write.
+      val addedToCalendar = !aiEnabled && DetectedStore.autoCalendar(applicationContext) && QuickCapture.capture(applicationContext, item).ok
       if (addedToCalendar || shouldNotifyNow(text, score, sbn.packageName)) notifyUser(item, addedToCalendar)
     }
   }
@@ -212,6 +232,18 @@ class LifeNoticeListenerService : NotificationListenerService() {
     extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(parts::add)
     extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.forEach { line ->
       line?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(parts::add)
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+      listOf(Notification.EXTRA_HISTORIC_MESSAGES, Notification.EXTRA_MESSAGES).forEach { key ->
+        val bundles = extras.getParcelableArray(key) ?: return@forEach
+        Notification.MessagingStyle.Message.getMessagesFromBundleArray(bundles).forEach { message ->
+          val messageText = message.text?.toString()?.trim().orEmpty()
+          if (messageText.isNotBlank()) {
+            @Suppress("DEPRECATION") val sender = message.sender?.toString()?.trim().orEmpty()
+            parts.add(if (sender.isBlank()) messageText else "$sender：$messageText")
+          }
+        }
+      }
     }
     return title.trim() to parts.joinToString("\n").take(8000)
   }
