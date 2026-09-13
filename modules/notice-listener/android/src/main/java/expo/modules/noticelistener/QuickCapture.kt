@@ -17,8 +17,9 @@ internal object QuickCapture {
   private val numericDate = Regex("""(?:(20\d{2})[年./-]\s*)?([01]?\d)[月./-]([0-3]?\d)(?:日|號)?""")
   private val weekday = Regex("""(下週|下星期)?(?:週|星期)([一二三四五六日天])""")
   private val relative = Regex("大後天|後天|明天|明晚|今天|今晚")
-  private val time = Regex("""(上午|早上|中午|下午|晚上|晚間|凌晨)?\s*([01]?\d|2[0-3])(?:[:：點時]\s*([0-5]?\d)?)""")
+  private val time = Regex("""(上午|早上|中午|下午|晚上|晚間|凌晨|今晚|明晚)?\s*([01]?\d|2[0-3])(?:[:：.．點時]\s*([0-5]?\d)?|\s*[～~至到-]\s*(?:[01]?\d|2[0-3]))""")
   private val leading = Regex("""^(?:請|記得|務必|別忘了?|麻煩|提醒(?:一下)?)[：:，,\s]*""")
+  private val agePrefix = Regex("""^\[\d+ 秒前]\s*""")
 
   fun capture(context: Context, item: DetectedNotice): QuickCaptureResult {
     val text = listOf(item.title, item.text).filter { it.isNotBlank() }.distinct().joinToString("\n")
@@ -35,7 +36,10 @@ internal object QuickCapture {
   }
 
   private fun eventTitle(item: DetectedNotice): String {
-    val body = item.text.lineSequence().map { it.trim() }.firstOrNull { it.length >= 2 }.orEmpty()
+    val body = item.text.lineSequence()
+      .map { it.trim().replace(agePrefix, "") }
+      .firstOrNull { it.length >= 2 && it != item.title.trim() && it != item.appName.trim() }
+      .orEmpty()
     val cleaned = (body.ifBlank { item.title })
       .replace(numericDate, " ")
       .replace(relative, " ")

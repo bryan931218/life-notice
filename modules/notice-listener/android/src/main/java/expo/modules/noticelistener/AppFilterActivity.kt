@@ -17,6 +17,7 @@ import android.view.View
 import android.widget.*
 
 class AppFilterActivity:Activity(){
+ private val commonMessagingPackages=setOf("jp.naver.line.android","com.facebook.orca","com.instagram.android","com.whatsapp","org.telegram.messenger")
  private val green=Color.rgb(39,94,78)
  private val ink=Color.rgb(34,60,53)
  private val muted=Color.rgb(107,126,121)
@@ -69,6 +70,7 @@ class AppFilterActivity:Activity(){
   root.addView(ScrollView(this).apply{addView(list)},LinearLayout.LayoutParams(-1,0,1f))
   save=button("儲存選擇",true).apply{isEnabled=false;setOnClickListener{
    AppMonitorStore.save(this@AppFilterActivity,selected);original=selected.toSet()
+   LifeNoticeListenerService.refreshActiveNotifications(this@AppFilterActivity)
    Toast.makeText(this@AppFilterActivity,if(selected.isEmpty())"已停用所有 App 的監聽" else "已儲存，監聽 ${selected.size} 個 App",Toast.LENGTH_LONG).show();finish()
   }}
   root.addView(save,LinearLayout.LayoutParams(-1,dp(54)).apply{topMargin=dp(8)})
@@ -87,7 +89,10 @@ class AppFilterActivity:Activity(){
      @Suppress("DEPRECATION") val label=try{packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg,0)).toString()}catch(e:Exception){"已移除的 App"}
      result.add(App(pkg,label,null))
     }
-    runOnUiThread{if(!isFinishing&&!isDestroyed){apps=result.sortedWith(compareByDescending<App>{it.pkg in selected}.thenBy{it.label.lowercase()});loading=false;save.isEnabled=true;render()}}
+    runOnUiThread{if(!isFinishing&&!isDestroyed){
+     if(!AppMonitorStore.isConfigured(this@AppFilterActivity)&&selected.isEmpty())selected.addAll(result.map{it.pkg}.filter{it in commonMessagingPackages})
+     apps=result.sortedWith(compareByDescending<App>{it.pkg in selected}.thenBy{it.label.lowercase()});loading=false;save.isEnabled=true;render()
+    }}
    }catch(e:Exception){runOnUiThread{if(!isFinishing&&!isDestroyed)count.text="無法載入 App，請返回後重試。"}}
   }.start()
  }

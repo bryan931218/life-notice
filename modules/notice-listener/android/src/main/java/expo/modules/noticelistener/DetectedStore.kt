@@ -43,11 +43,14 @@ internal object DetectedStore {
   private const val KEY = "detected"
   private const val AI_MODE = "ai_enabled"
   private const val ALERT_LEVEL = "alert_level"
+  private const val AUTO_CALENDAR = "auto_calendar"
   private const val MAX = 120
   private const val CONTEXT_WINDOW = 15L * 60L * 1000L
   private val AGE_PREFIX = Regex("^\\[\\d+ 秒前]\\s*")
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+  fun autoCalendar(context: Context) = prefs(context).getBoolean(AUTO_CALENDAR, false)
+  fun setAutoCalendar(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(AUTO_CALENDAR, enabled).apply()
 
   private fun normalizedContext(text: String): String = text
     .lineSequence()

@@ -90,6 +90,12 @@ class NoticeListenerModule : Module() {
       null
     }
 
+    Function("setAutoCalendar") { enabled: Boolean ->
+      val context = appContext.reactContext ?: return@Function null
+      DetectedStore.setAutoCalendar(context, enabled)
+      null
+    }
+
     Function("canReply") { noticeId: String ->
       val context = appContext.reactContext ?: return@Function false
       LifeNoticeListenerService.canReply(context, noticeId)

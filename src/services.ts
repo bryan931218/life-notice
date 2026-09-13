@@ -24,7 +24,7 @@ export function isObviousNoiseText(text:string){return OBVIOUS_NOISE.test(text);
 
 export type DetectedNotification={id:string;packageName:string;appName:string;title:string;text:string;receivedAt:number;score:number;reason:string};
 export function notificationPolicy(item:DetectedNotification){return gmailNotificationPolicy(item.packageName,item.title,item.text);}
-const listener=Platform.OS==='android'?requireOptionalNativeModule<{isEnabled():boolean;hasListenerPermission():boolean;getMonitoredCount():number;openSettings():void;requestQuickTile():boolean;getDetected():DetectedNotification[];markProcessed(ids:string[]):void;clearDetected():void;resetLocal():void;setAiMode(enabled:boolean):void;setAlertLevel(level:string):void;addCalendarEvent(title:string,startAt:number,endAt:number,allDay:boolean,description:string,location:string,syncKey:string):string}>('NoticeListener'):null;
+const listener=Platform.OS==='android'?requireOptionalNativeModule<{isEnabled():boolean;hasListenerPermission():boolean;getMonitoredCount():number;openSettings():void;requestQuickTile():boolean;getDetected():DetectedNotification[];markProcessed(ids:string[]):void;clearDetected():void;resetLocal():void;setAiMode(enabled:boolean):void;setAlertLevel(level:string):void;setAutoCalendar(enabled:boolean):void;addCalendarEvent(title:string,startAt:number,endAt:number,allDay:boolean,description:string,location:string,syncKey:string):string}>('NoticeListener'):null;
 export function notificationListenerSupported(){return Platform.OS==='android'&&!!listener;}
 export function monitoredAppCount(){return listener?.getMonitoredCount()??0;}
 export function notificationListenerPermission(){return !!listener?.hasListenerPermission();}
@@ -70,19 +70,19 @@ export async function hasOpenAiKey(){return !!(await getOpenAiKey());}
 export async function clearOpenAiKey(){if(Platform.OS!=='web')await SecureStore.deleteItemAsync(OPENAI_KEY_KEY);const settings=await getAiSettings();await setAiSettings({...settings,enabled:false});}
 
 export async function getAutoCalendarEnabled(){
-  if(Platform.OS!=='android'||(await AsyncStorage.getItem(AUTO_CALENDAR_KEY))!=='1')return false;
+  if(Platform.OS!=='android'||(await AsyncStorage.getItem(AUTO_CALENDAR_KEY))!=='1'){listener?.setAutoCalendar(false);return false;}
   const read=await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_CALENDAR),write=await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR);
-  if(read&&write)return true;
-  await AsyncStorage.setItem(AUTO_CALENDAR_KEY,'0');return false;
+  if(read&&write){listener?.setAutoCalendar(true);return true;}
+  await AsyncStorage.setItem(AUTO_CALENDAR_KEY,'0');listener?.setAutoCalendar(false);return false;
 }
 export async function setAutoCalendarEnabled(enabled:boolean){
   if(Platform.OS!=='android'){await AsyncStorage.setItem(AUTO_CALENDAR_KEY,'0');return false;}
   if(enabled){
     const result=await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.READ_CALENDAR,PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR]);
     const granted=result[PermissionsAndroid.PERMISSIONS.READ_CALENDAR]===PermissionsAndroid.RESULTS.GRANTED&&result[PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR]===PermissionsAndroid.RESULTS.GRANTED;
-    if(!granted){await AsyncStorage.setItem(AUTO_CALENDAR_KEY,'0');return false;}
+    if(!granted){await AsyncStorage.setItem(AUTO_CALENDAR_KEY,'0');listener?.setAutoCalendar(false);return false;}
   }
-  await AsyncStorage.setItem(AUTO_CALENDAR_KEY,enabled?'1':'0');return enabled;
+  await AsyncStorage.setItem(AUTO_CALENDAR_KEY,enabled?'1':'0');listener?.setAutoCalendar(enabled);return enabled;
 }
 export async function requestCalendarPermission(){
   const result=await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.READ_CALENDAR,PermissionsAndroid.PERMISSIONS.WRITE_CALENDAR]);

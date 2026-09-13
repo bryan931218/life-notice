@@ -24,6 +24,8 @@ internal object CaptureDate {
       d.add(Calendar.DAY_OF_MONTH,delta);dates.add(d.timeInMillis)
     }
     for(m in Regex("""(?<!\d)(?:(20\d{2})[年/.-])?(\d{1,2})[月/.-](\d{1,2})(?:日|號)?(?!\d)""").findAll(text)) {
+      val before=text.substring(0,m.range.first).takeLast(12)
+      if(m.value.contains('.')&&m.groupValues[1].isEmpty()&&Regex("(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*$").containsMatchIn(before))continue
       val y=m.groupValues[1].toIntOrNull()?:base.get(Calendar.YEAR)
       val month=m.groupValues[2].toInt();val date=m.groupValues[3].toInt()
       val d=day().apply { set(y,month-1,date) }
@@ -37,9 +39,19 @@ internal object CaptureDate {
       return digits.indexOf(v)
     }
     val times=linkedSetOf<Pair<Int,Int>>()
-    for(m in Regex("""(上午|早上|中午|下午|晚上|晚間|凌晨|今晚|明晚)?\s*(\d{1,2}|[零〇一二兩三四五六七八九十]{1,3})\s*(?:[:：點時](半|\d{1,2}|[零〇一二兩三四五六七八九十]{1,3})?(?:分)?|\.(?=\D|$))""").findAll(text)) {
+    val range=Regex("""(上午|早上|中午|下午|晚上|晚間|凌晨|今晚|明晚)?[^\n]{0,12}?(\d{1,2})\s*[～~至到-]\s*(\d{1,2})(?=\D|$)""").find(text)
+    if(range!=null){
+      val part=range.groupValues[1].ifEmpty { text.substring(0,range.range.first).takeLast(20).let { before -> Regex("上午|早上|中午|下午|晚上|晚間|凌晨|今晚|明晚").find(before)?.value.orEmpty() } }
+      fun hour(raw:String):Int { var h=raw.toInt();if(part in listOf("下午","晚上","晚間","今晚","明晚")&&h<12)h+=12;if(part=="中午"&&h<11)h+=12;if(part in listOf("凌晨","上午","早上")&&h==12)h=0;return h }
+      val startHour=hour(range.groupValues[2]);var endHour=hour(range.groupValues[3]);if(endHour<=startHour)endHour+=12
+      if(startHour in 0..23&&endHour in 1..24){
+        if(dates.isEmpty()&&part.isNotEmpty())dates.add(day().timeInMillis)
+        if(dates.size==1){val startDay=day().apply{timeInMillis=dates.first();set(Calendar.HOUR_OF_DAY,startHour)};if(startDay.timeInMillis>=receivedAt)return CaptureTime(startDay.timeInMillis,startDay.timeInMillis+(endHour-startHour)*3_600_000L,false)}
+      }
+    }
+    for(m in Regex("""(上午|早上|中午|下午|晚上|晚間|凌晨|今晚|明晚)?\s*(\d{1,2}|[零〇一二兩三四五六七八九十]{1,3})\s*(?:[:：.．點時](半|\d{1,2}|[零〇一二兩三四五六七八九十]{1,3})?(?:分)?)""").findAll(text)) {
       var h=number(m.groupValues[2]);val min=if(m.groupValues[3]=="半")30 else if(m.groupValues[3].isEmpty())0 else number(m.groupValues[3])
-      val part=m.groupValues[1].ifEmpty { if(Regex("今晚|明晚").containsMatchIn(text))"晚上" else "" }
+      val part=m.groupValues[1].ifEmpty { if(Regex("今晚|明晚").containsMatchIn(text))"晚上" else Regex("上午|早上|中午|下午|晚上|晚間|凌晨").find(text.substring(0,m.range.first).takeLast(16))?.value.orEmpty() }
       if(part in listOf("下午","晚上","晚間","今晚","明晚")&&h<12)h+=12
       if(part=="中午"&&h<11)h+=12
       if(part in listOf("凌晨","上午","早上")&&h==12)h=0

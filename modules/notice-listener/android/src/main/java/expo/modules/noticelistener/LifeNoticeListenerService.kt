@@ -21,14 +21,14 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val DATE = Regex("(?:20\\d{2}[年./-])?\\s*(?:1[0-2]|0?[1-9])[月./-](?:3[01]|[12]\\d|0?[1-9])(?:日|號)?")
     private val RELATIVE = Regex("今天|今晚|明天|明晚|後天|大後天|這週|本週|下週|下星期|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天]")
     private val DAYPART = Regex("早上|上午|中午|下午|晚上|晚間|今晚|明晚")
-    private val ARABIC_TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*)?(?:[01]?\\d|2[0-3])(?:\\s*(?:[:：點時]\\s*[0-5]?\\d?|點半)|\\.(?=\\D|$))")
+    private val ARABIC_TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*)?(?:[01]?\\d|2[0-3])(?:\\s*(?:[:：.．點時]\\s*[0-5]?\\d?|點半)|\\s*[～~至到-]\\s*(?:[01]?\\d|2[0-3]))")
     private val RELATIVE_NUMBER_TIME = Regex("(?:今天|今晚|明天|明晚|後天|大後天|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天])[^\\n]{0,5}(?:[01]?\\d|2[0-3])(?=\\s|[.。,:：點時]|$)")
     private val CHINESE_TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*)?(?:二十[零〇一二三]?|十[零〇一二三四五六七八九]?|[零〇一二兩三四五六七八九])點(?:半|[零〇一二兩三四五六七八九十]{1,3}分?)?")
     private val MAP_LINK = Regex("https?://(?:maps\\.app\\.goo\\.gl|goo\\.gl/maps|www\\.google\\.[^/]+/maps|maps\\.google\\.)/[^\\s]+", RegexOption.IGNORE_CASE)
     private val HIGH_INTENT = Regex("截止|最晚|到期|繳交|繳費|繳款|付款|取件|領取|取貨|集合|報名|預約|會議|開會|面試|上課|考試|比賽|登機|出發|看診|門診|回診|訂位|入住|退房")
     private val TASK_INTENT = Regex("填寫|回覆|提交|完成|準備|攜帶|帶上|聯絡|寄送|繳交|繳費|付款|領取|取件|報名|預約|購買|買|訂購|確認")
     private val EVENT = Regex("活動|課程|講座|聚餐|會議|比賽|考試|面試|預約|看診|回診|集合|出發|登機|訂位")
-    private val SOCIAL_PLAN = Regex("吃飯|吃早餐|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|練球|唱歌|逛街|約一下|約嗎|要不要|一起|吃這家|去這家")
+    private val SOCIAL_PLAN = Regex("吃飯|吃早餐|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|羽球|籃球|棒球|運動|練球|唱歌|逛街|約一下|約嗎|要不要|一起|吃這家|去這家")
     private val ACTION = Regex("請|需要|需|須|務必|記得|別忘|回覆|填寫|完成|提交|繳|帶|攜帶|準備|確認|參加|出席|領取|取件|付款|報名|預約")
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
@@ -45,11 +45,67 @@ class LifeNoticeListenerService : NotificationListenerService() {
       if (text.isBlank()) return false
       return current?.sendReply(context, noticeId, text.trim()) ?: false
     }
+
+    fun refreshActiveNotifications(context: Context) {
+      val service = current
+      if (service != null) {
+        runCatching { service.activeNotifications.sortedBy { it.postTime }.forEach(service::processNotification) }
+      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        runCatching { NotificationListenerService.requestRebind(ComponentName(context, LifeNoticeListenerService::class.java)) }
+      }
+    }
+
+    internal fun isCandidateText(text: String, aiEnabled: Boolean = false): Boolean {
+      val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
+      val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
+      val hasDaypart = DAYPART.containsMatchIn(text)
+      val hasMapLink = MAP_LINK.containsMatchIn(text)
+      val hasHighIntent = HIGH_INTENT.containsMatchIn(text)
+      val hasTaskIntent = TASK_INTENT.containsMatchIn(text)
+      val hasEvent = EVENT.containsMatchIn(text)
+      val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
+      val hasAction = ACTION.containsMatchIn(text)
+      val hasChange = CHANGE.containsMatchIn(text)
+      val conversationalPlan = hasDate && hasSocialPlan && (hasTime || hasDaypart || hasMapLink)
+      val aiContextCandidate = aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink) &&
+        (hasSocialPlan || hasMapLink || hasHighIntent || hasEvent)
+      return hasChange ||
+        hasTaskIntent ||
+        conversationalPlan ||
+        (hasDate && hasTime) ||
+        (hasTime && hasDaypart && hasSocialPlan) ||
+        aiContextCandidate ||
+        (hasHighIntent && (hasDate || hasTime || hasDaypart || hasAction)) ||
+        (hasDate && hasAction) ||
+        (hasDate && (hasTime || hasDaypart) && hasEvent)
+    }
+
+    internal fun scoreText(text: String): Pair<Int, String> {
+      var score = 0
+      val reasons = mutableListOf<String>()
+      if (DATE.containsMatchIn(text)) { score += 5; reasons += "日期" }
+      if (RELATIVE.containsMatchIn(text)) { score += 4; reasons += "相對日期" }
+      val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
+      if (hasTime) { score += 3; reasons += "時間" }
+      else if (DAYPART.containsMatchIn(text)) { score += 2; reasons += "時段" }
+      if (hasTime && DAYPART.containsMatchIn(text)) { score += 1; reasons += "時段" }
+      if (MAP_LINK.containsMatchIn(text)) { score += 3; reasons += "地點連結" }
+      if (HIGH_INTENT.containsMatchIn(text)) { score += 5; reasons += "行程/期限" }
+      else if (EVENT.containsMatchIn(text)) { score += 3; reasons += "活動語意" }
+      if (SOCIAL_PLAN.containsMatchIn(text)) { score += 3; reasons += "約定語意" }
+      if (TASK_INTENT.containsMatchIn(text)) { score += 6; reasons += "待辦" }
+      else if (ACTION.containsMatchIn(text)) { score += 2; reasons += "待辦語意" }
+      if (IMPORTANT.containsMatchIn(text)) { score += 4; reasons += "重要訊息" }
+      return score to reasons.distinct().joinToString("、")
+    }
   }
 
   override fun onListenerConnected() {
     super.onListenerConnected()
     current = this
+    // Android does not always replay notifications that were already visible when
+    // access was granted. Scan the active shade once so setup has an immediate result.
+    runCatching { activeNotifications.sortedBy { it.postTime }.forEach(::processNotification) }
   }
 
   override fun onDestroy() {
@@ -58,7 +114,11 @@ class LifeNoticeListenerService : NotificationListenerService() {
   }
 
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
-    if (sbn == null || sbn.packageName == packageName) return
+    if (sbn != null) processNotification(sbn)
+  }
+
+  private fun processNotification(sbn: StatusBarNotification) {
+    if (sbn.packageName == packageName) return
     if (!AppMonitorStore.isAllowed(applicationContext, sbn.packageName)) return
 
     val notification = sbn.notification ?: return
@@ -94,21 +154,12 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val hasChange = CHANGE.containsMatchIn(text)
     val aiEnabled = DetectedStore.aiMode(applicationContext)
 
-    // A short sequence of messages in the same conversation is treated as one context.
-    // This catches patterns such as "明天晚上吃這家喔" followed by a Google Maps URL.
-    val conversationalPlan = hasDate && hasSocialPlan && (hasTime || hasDaypart || hasMapLink)
-    val aiContextCandidate = aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink) &&
-      (hasSocialPlan || hasMapLink || hasHighIntent || hasEvent)
-    val candidate = hasChange ||
-      hasTaskIntent ||
-      conversationalPlan ||
-      aiContextCandidate ||
-      (hasHighIntent && (hasDate || hasTime || hasDaypart || hasAction)) ||
-      (hasDate && hasAction) ||
-      (hasDate && (hasTime || hasDaypart) && hasEvent)
+    // Explicit date + time is already a useful schedule signal for apps the user selected.
+    // Conversation context also catches split messages such as "晚上打羽球" then "6～8".
+    val candidate = isCandidateText(text, aiEnabled)
     if (!candidate) return
 
-    val (score, reason) = score(text)
+    val (score, reason) = scoreText(text)
     val minScore = if (aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink)) 5 else 7
     if (score < minScore) return
 
@@ -120,7 +171,10 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, text.ifBlank { currentText }, now, score, reason)
 
     if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
-    if (DetectedStore.add(applicationContext, item) && shouldNotifyNow(text, score, sbn.packageName)) notifyUser(item)
+    if (DetectedStore.add(applicationContext, item)) {
+      val addedToCalendar = DetectedStore.autoCalendar(applicationContext) && QuickCapture.capture(applicationContext, item).ok
+      if (addedToCalendar || shouldNotifyNow(text, score, sbn.packageName)) notifyUser(item, addedToCalendar)
+    }
   }
 
   private fun shouldNotifyNow(text: String, score: Int, sourcePackage: String): Boolean {
@@ -190,27 +244,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     }.getOrDefault(false)
   }
 
-  private fun score(text: String): Pair<Int, String> {
-    var score = 0
-    val reasons = mutableListOf<String>()
-    if (DATE.containsMatchIn(text)) { score += 5; reasons += "日期" }
-    if (RELATIVE.containsMatchIn(text)) { score += 4; reasons += "相對日期" }
-    if (ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)) {
-      score += 3; reasons += "時間"
-    } else if (DAYPART.containsMatchIn(text)) {
-      score += 2; reasons += "時段"
-    }
-    if (MAP_LINK.containsMatchIn(text)) { score += 3; reasons += "地點連結" }
-    if (HIGH_INTENT.containsMatchIn(text)) { score += 5; reasons += "行程/期限" }
-    else if (EVENT.containsMatchIn(text)) { score += 3; reasons += "活動語意" }
-    if (SOCIAL_PLAN.containsMatchIn(text)) { score += 3; reasons += "約定語意" }
-    if (TASK_INTENT.containsMatchIn(text)) { score += 6; reasons += "待辦" }
-    else if (ACTION.containsMatchIn(text)) { score += 2; reasons += "待辦語意" }
-    if (IMPORTANT.containsMatchIn(text)) { score += 4; reasons += "重要訊息" }
-    return score to reasons.distinct().joinToString("、")
-  }
-
-  private fun notifyUser(item: DetectedNotice) {
+  private fun notifyUser(item: DetectedNotice, addedToCalendar: Boolean = false) {
     val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_HIGH))
@@ -228,13 +262,13 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
     builder
       .setSmallIcon(applicationInfo.icon)
-      .setContentTitle("偵測到行程")
+      .setContentTitle(if (addedToCalendar) "已加入行事曆" else "偵測到行程")
       .setContentText("${item.appName} · $preview")
       .setStyle(Notification.BigTextStyle().bigText("來源：${item.appName}\n$preview"))
       .setAutoCancel(true)
       .setCategory(Notification.CATEGORY_REMINDER)
       .setContentIntent(pending)
-      .addAction(0, "加入行事曆", capturePending)
+    if (!addedToCalendar) builder.addAction(0, "加入行事曆", capturePending)
     runCatching { manager.notify(item.id.hashCode(), builder.build()) }
   }
 }
