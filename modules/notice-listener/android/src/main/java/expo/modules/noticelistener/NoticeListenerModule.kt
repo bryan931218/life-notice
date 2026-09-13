@@ -61,7 +61,7 @@ class NoticeListenerModule : Module() {
 
     Function("markProcessed") { ids: List<String> ->
       val context = appContext.reactContext ?: return@Function null
-      DetectedStore.remove(context, ids.toSet())
+      DetectedStore.markProcessed(context, ids.toSet())
       null
     }
 
@@ -81,6 +81,7 @@ class NoticeListenerModule : Module() {
     Function("setAiMode") { enabled: Boolean ->
       val context = appContext.reactContext ?: return@Function null
       DetectedStore.setAiMode(context, enabled)
+      if (enabled) LifeNoticeListenerService.refreshActiveNotifications(context)
       null
     }
 

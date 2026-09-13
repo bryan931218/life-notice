@@ -19,6 +19,7 @@ export type AiSettings={enabled:boolean;model:AiModel};
 export type AlertLevel='important'|'balanced'|'all';
 const AUTO_SOURCE=/^\[(?:AI)?自動偵測｜/;
 const OBVIOUS_NOISE=/Samsung\s*Rewards|Rewards|獲得\s*\d+\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|驗證碼|認證碼|一次性密碼|\bOTP\b|verification\s*code|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞|推薦文章|每日精選|購物優惠|會員好康|#請益|數位城市迷彩/i;
+const HARD_NOISE=/節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|VPN|截圖已儲存|驗證碼|認證碼|一次性密碼|\bOTP\b|verification\s*code/i;
 
 export function isObviousNoiseText(text:string){return OBVIOUS_NOISE.test(text);}
 
@@ -33,9 +34,11 @@ export function openNotificationListenerSettings(){if(!listener)throw new Error(
 export function requestQuickCaptureTile(){if(!listener)throw new Error('快速擷取只支援 Android 原生版。');return listener.requestQuickTile();}
 export function getDetectedNotifications():DetectedNotification[]{
   const all=listener?.getDetected()??[];
-  const ignored=all.filter(x=>isObviousNoiseText(`${x.appName}\n${x.title}\n${x.text}`)||notificationPolicy(x)==='ignore');
+  // Keep source-specific borderline items in the queue. App.tsx knows whether AI
+  // mode is enabled and lets the model inspect them before deciding to ignore.
+  const ignored=all.filter(x=>HARD_NOISE.test(`${x.appName}\n${x.title}\n${x.text}`));
   if(ignored.length)listener?.markProcessed(ignored.map(x=>x.id));
-  return all.filter(x=>!isObviousNoiseText(`${x.appName}\n${x.title}\n${x.text}`)&&notificationPolicy(x)!=='ignore');
+  return all.filter(x=>!HARD_NOISE.test(`${x.appName}\n${x.title}\n${x.text}`));
 }
 export function markDetectedNotificationsProcessed(ids:string[]){listener?.markProcessed(ids);}
 export function clearDetectedNotifications(){listener?.clearDetected();}

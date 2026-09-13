@@ -44,7 +44,9 @@ internal object DetectedStore {
   private const val AI_MODE = "ai_enabled"
   private const val ALERT_LEVEL = "alert_level"
   private const val AUTO_CALENDAR = "auto_calendar"
+  private const val PROCESSED = "processed_ids_v1"
   private const val MAX = 120
+  private const val MAX_PROCESSED = 500
   private const val CONTEXT_WINDOW = 15L * 60L * 1000L
   private val AGE_PREFIX = Regex("^\\[\\d+ 秒前]\\s*")
 
@@ -75,6 +77,7 @@ internal object DetectedStore {
 
   @Synchronized
   fun add(context: Context, item: DetectedNotice): Boolean {
+    if (item.id in processed(context)) return false
     val current = get(context).toMutableList()
     if (current.any { it.id == item.id }) return false
 
@@ -122,6 +125,17 @@ internal object DetectedStore {
     if (ids.isEmpty()) return
     save(context, get(context).filterNot { it.id in ids })
   }
+
+  @Synchronized
+  fun markProcessed(context: Context, ids: Set<String>) {
+    if (ids.isEmpty()) return
+    val updated = (ids.toList() + processed(context).toList()).distinct().take(MAX_PROCESSED).toSet()
+    prefs(context).edit().putStringSet(PROCESSED, updated).apply()
+    remove(context, ids)
+  }
+
+  private fun processed(context: Context): Set<String> =
+    prefs(context).getStringSet(PROCESSED, emptySet())?.toSet() ?: emptySet()
 
   fun aiMode(context: Context) = prefs(context).getBoolean(AI_MODE, false)
 

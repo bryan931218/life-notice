@@ -14,4 +14,5 @@ class CaptureDateTest {
   @Test fun eveningRangeUsesToday(){val p=CaptureDate.parse("晚上要不要打羽球\n6～8",base())!!;val d=Calendar.getInstance().apply{timeInMillis=p.start};assertEquals(18,d.get(Calendar.HOUR_OF_DAY));assertEquals(2*3_600_000L,p.end-p.start)}
   @Test fun listenerAcceptsDottedTimePlan(){val text="今天晚上7.30去星月廣場吃古拉爵";assertTrue(LifeNoticeListenerService.isCandidateText(text));assertTrue(LifeNoticeListenerService.scoreText(text).first>=7)}
   @Test fun listenerAcceptsSplitSportsPlan(){val text="晚上要不要打羽球\n6～8";assertTrue(LifeNoticeListenerService.isCandidateText(text));assertTrue(LifeNoticeListenerService.scoreText(text).first>=7)}
+  @Test fun aiModeUsesRecallFirstFilter(){assertTrue(LifeNoticeListenerService.isCandidateText("晚點再跟你確認細節",true))}
 }

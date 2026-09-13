@@ -32,6 +32,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val ACTION = Regex("請|需要|需|須|務必|記得|別忘|回覆|填寫|完成|提交|繳|帶|攜帶|準備|確認|參加|出席|領取|取件|付款|報名|預約")
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
+    private val HARD_IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|VPN|截圖已儲存", RegexOption.IGNORE_CASE)
     private val IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|Samsung Rewards|Rewards|獲得\\s*\\d+\\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞", RegexOption.IGNORE_CASE)
     private const val GMAIL_PACKAGE = "com.google.android.gm"
     private val GMAIL_SUMMARY = Regex("\\b\\d+\\s*封新郵件\\b|\\b\\d+\\s+new\\s+emails?\\b|new mail summary", RegexOption.IGNORE_CASE)
@@ -56,6 +57,9 @@ class LifeNoticeListenerService : NotificationListenerService() {
     }
 
     internal fun isCandidateText(text: String, aiEnabled: Boolean = false): Boolean {
+      // AI mode is deliberately recall-first. The service has already removed hard
+      // noise and only receives packages explicitly selected by the user.
+      if (aiEnabled && text.trim().length >= 3) return true
       val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
       val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
       val hasDaypart = DAYPART.containsMatchIn(text)
@@ -125,10 +129,12 @@ class LifeNoticeListenerService : NotificationListenerService() {
     if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
     val (title, body) = extract(notification)
     val currentText = listOf(title, body).filter { it.isNotBlank() }.distinct().joinToString("\n").trim()
-    if (currentText.length < 3 || IGNORE.containsMatchIn(currentText)) return
+    val aiEnabled = DetectedStore.aiMode(applicationContext)
+    if (currentText.length < 3 || HARD_IGNORE.containsMatchIn(currentText)) return
+    if (!aiEnabled && IGNORE.containsMatchIn(currentText)) return
     if (sbn.packageName == GMAIL_PACKAGE) {
       if (GMAIL_SUMMARY.containsMatchIn(currentText)) return
-      if (GMAIL_BROADCAST.containsMatchIn(currentText) && !GMAIL_PERSONAL.containsMatchIn(currentText)) return
+      if (!aiEnabled && GMAIL_BROADCAST.containsMatchIn(currentText) && !GMAIL_PERSONAL.containsMatchIn(currentText)) return
     }
 
     val now = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis()
@@ -152,15 +158,13 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
     val hasAction = ACTION.containsMatchIn(text)
     val hasChange = CHANGE.containsMatchIn(text)
-    val aiEnabled = DetectedStore.aiMode(applicationContext)
-
     // Explicit date + time is already a useful schedule signal for apps the user selected.
     // Conversation context also catches split messages such as "晚上打羽球" then "6～8".
     val candidate = isCandidateText(text, aiEnabled)
     if (!candidate) return
 
     val (score, reason) = scoreText(text)
-    val minScore = if (aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink)) 5 else 7
+    val minScore = if (aiEnabled) 0 else 7
     if (score < minScore) return
 
     val appName = runCatching {
@@ -168,7 +172,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
       packageManager.getApplicationLabel(info).toString()
     }.getOrDefault(sbn.packageName)
     val id = DetectedStore.idFor(sbn.packageName, title, text, now)
-    val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, text.ifBlank { currentText }, now, score, reason)
+    val item = DetectedNotice(id, sbn.packageName, appName, title.ifBlank { appName }, text.ifBlank { currentText }, now, score, reason.ifBlank { if (aiEnabled) "AI 全面判斷" else "候選訊息" })
 
     if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
     if (DetectedStore.add(applicationContext, item)) {

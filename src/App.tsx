@@ -79,7 +79,9 @@ function Main(){
     let settings=await api.getAiSettings();
     let key=settings.enabled?await api.getOpenAiKey():null;
     if(settings.enabled&&!key){settings={...settings,enabled:false};await api.setAiSettings(settings)}
-    const detected=api.getDetectedNotifications().slice(0,12);
+    // Drain the oldest queued notifications first so a busy chat cannot permanently
+    // starve an earlier potentially important item. Twelve calls per activation caps cost.
+    const detected=api.getDetectedNotifications().sort((a,b)=>a.receivedAt-b.receivedAt).slice(0,12);
     if(!detected.length)return base??live.current;
     let next=base??live.current;
     const seen=new Set(next.notices.map(n=>n.source.match(/\[偵測ID:([^\]]+)\]/)?.[1]).filter(Boolean));
@@ -89,7 +91,7 @@ function Main(){
       const raw=[item.title,item.text].filter(Boolean).join('\n').trim();
       if(!raw){processed.push(item.id);continue}
       const sourcePolicy=api.notificationPolicy(item);
-      if(sourcePolicy==='ignore'){processed.push(item.id);continue}
+      if(sourcePolicy==='ignore'&&!settings.enabled){processed.push(item.id);continue}
       let made:Notice|null=null;
       if(settings.enabled&&key){
         try{

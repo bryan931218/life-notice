@@ -4,5 +4,5 @@
     "strict": true,
     "allowImportingTsExtensions": true
   },
-  "exclude": ["node_modules", "tests", "android", "ios"]
+  "exclude": ["node_modules", "tests", "android", "ios", "output"]
 }
