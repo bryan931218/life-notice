@@ -27,36 +27,15 @@ class NoticeListenerModule : Module() {
 
   private fun addCalendarEvent(title: String, startAt: Long, endAt: Long, allDay: Boolean, description: String, location: String, syncKey: String): String {
     val context = appContext.reactContext ?: throw IllegalStateException("App 尚未準備好")
-    val prefs = context.getSharedPreferences("life_notice_listener_v1", android.content.Context.MODE_PRIVATE)
-    val synced = prefs.getStringSet("calendar_synced", emptySet())?.toMutableSet() ?: mutableSetOf()
-    if (syncKey.isNotBlank() && syncKey in synced) return "already-synced"
-
-    val projection = arrayOf(CalendarContract.Calendars._ID, CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL, CalendarContract.Calendars.IS_PRIMARY)
-    val selection = "${CalendarContract.Calendars.VISIBLE}=1 AND ${CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL}>=?"
-    val args = arrayOf(CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR.toString())
-    val calendarId = context.contentResolver.query(CalendarContract.Calendars.CONTENT_URI, projection, selection, args, "${CalendarContract.Calendars.IS_PRIMARY} DESC")?.use { cursor ->
-      if (cursor.moveToFirst()) cursor.getLong(0) else null
-    } ?: throw IllegalStateException("找不到可寫入的手機行事曆")
-
-    val values = ContentValues().apply {
-      put(CalendarContract.Events.CALENDAR_ID, calendarId)
-      put(CalendarContract.Events.TITLE, title.take(200))
-      put(CalendarContract.Events.DESCRIPTION, description.take(4000))
-      put(CalendarContract.Events.DTSTART, startAt)
-      put(CalendarContract.Events.DTEND, if (endAt > startAt) endAt else startAt + 30L * 60L * 1000L)
-      put(CalendarContract.Events.ALL_DAY, if (allDay) 1 else 0)
-      if (location.isNotBlank()) put(CalendarContract.Events.EVENT_LOCATION, location.take(200))
-      put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
-    }
-    val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values) ?: throw IllegalStateException("行事曆寫入失敗")
-    if (syncKey.isNotBlank()) { synced.add(syncKey); prefs.edit().putStringSet("calendar_synced", synced).apply() }
-    return uri.lastPathSegment ?: "created"
+    return CalendarWriter.write(context,title,startAt,endAt,allDay,description,location,syncKey)
   }
 
   override fun definition() = ModuleDefinition {
     Name("NoticeListener")
 
     Function("isEnabled") { enabled() }
+    Function("hasListenerPermission") { listenerPermissionEnabled() }
+    Function("getMonitoredCount") { appContext.reactContext?.let { AppMonitorStore.selected(it).size } ?: 0 }
 
     Function("openSettings") {
       val context = appContext.reactContext ?: return@Function null
@@ -82,7 +61,7 @@ class NoticeListenerModule : Module() {
 
     Function("markProcessed") { ids: List<String> ->
       val context = appContext.reactContext ?: return@Function null
-      DetectedStore.remove(context, ids.toSet())
+      DetectedStore.markProcessed(context, ids.toSet())
       null
     }
 
@@ -92,15 +71,29 @@ class NoticeListenerModule : Module() {
       null
     }
 
+    Function("resetLocal") {
+      val context = appContext.reactContext ?: return@Function null
+      context.getSharedPreferences("life_notice_listener_v1", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+      (context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).cancelAll()
+      null
+    }
+
     Function("setAiMode") { enabled: Boolean ->
       val context = appContext.reactContext ?: return@Function null
       DetectedStore.setAiMode(context, enabled)
+      if (enabled) LifeNoticeListenerService.refreshActiveNotifications(context)
       null
     }
 
     Function("setAlertLevel") { level: String ->
       val context = appContext.reactContext ?: return@Function null
       DetectedStore.setAlertLevel(context, level)
+      null
+    }
+
+    Function("setAutoCalendar") { enabled: Boolean ->
+      val context = appContext.reactContext ?: return@Function null
+      DetectedStore.setAutoCalendar(context, enabled)
       null
     }
 

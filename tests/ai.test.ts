@@ -44,6 +44,6 @@ describe('AI 工具呼叫安全檢查',()=>{
   it('禁止用無效時間建立行事曆事件',()=>{
     assert.throws(()=>parseAiToolCall({name:'create_calendar_event',arguments:JSON.stringify({
       title:'測試',start_at:'明天下午',end_at:null,all_day:false,location:null,reminder_minutes:60,category:'生活',checklist:[],importance:'normal',confidence:0.8,reason:'測試'
-    })}),/有效的行程時間/);
+    })}),/日期或時區格式不正確/);
   });
 });
