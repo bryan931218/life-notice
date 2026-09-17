@@ -32,6 +32,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          # The legacy `tools` package was removed from Google's repository.
+          # Command-line tools are installed by the action itself; Gradle resolves
+          # the exact platform/build-tools required by the generated project.
+          packages: ''
 
       - name: Install dependencies
         shell: bash
