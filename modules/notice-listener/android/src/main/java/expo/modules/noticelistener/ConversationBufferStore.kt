@@ -16,8 +16,17 @@ internal object ConversationBufferStore {
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
 
+  internal fun normalizeTitle(title: String): String = title
+    .trim()
+    .lowercase()
+    .replace(Regex("(?:[（(]\\s*\\d+\\s*(?:則|封|個)?(?:新訊息|未讀訊息|則訊息|messages?)?\\s*[)）]|\\s+\\d+\\s*(?:則新訊息|封新郵件|則未讀訊息|new messages?|messages?))$", RegexOption.IGNORE_CASE), "")
+    .replace(Regex("\\s*[·•]\\s*\\d+\\s*(?:則|封|個)?(?:新訊息|未讀)?$"), "")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+    .take(120)
+
   private fun threadId(packageName: String, title: String): String {
-    val normalized = title.trim().lowercase().replace(Regex("\\s+"), " ").take(120)
+    val normalized = normalizeTitle(title)
     val bytes = MessageDigest.getInstance("SHA-256").digest("$packageName|$normalized".toByteArray())
     return bytes.take(10).joinToString("") { "%02x".format(it) }
   }

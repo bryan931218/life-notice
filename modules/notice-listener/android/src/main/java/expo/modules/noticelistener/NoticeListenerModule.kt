@@ -34,6 +34,7 @@ class NoticeListenerModule : Module() {
     Name("NoticeListener")
 
     Function("isEnabled") { enabled() }
+    Function("isConnected") { LifeNoticeListenerService.isConnected() }
     Function("hasListenerPermission") { listenerPermissionEnabled() }
     Function("getMonitoredCount") { appContext.reactContext?.let { AppMonitorStore.selected(it).size } ?: 0 }
 
@@ -63,6 +64,13 @@ class NoticeListenerModule : Module() {
       val context = appContext.reactContext ?: return@Function null
       DetectedStore.markProcessed(context, ids.toSet())
       null
+    }
+
+    Function("reconnect") {
+      val context = appContext.reactContext ?: return@Function false
+      if (!listenerPermissionEnabled()) return@Function false
+      LifeNoticeListenerService.refreshActiveNotifications(context)
+      true
     }
 
     Function("clearDetected") {

@@ -27,6 +27,15 @@ const isAuto=(n:Notice)=>/^\[(?:AI)?自動偵測｜/.test(n.source);
 const stripDetectedId=(source:string)=>source.replace(/\n\[偵測ID:[^\]]+\]$/,'');
 const whenLabel=(n:Notice)=>n.dueAt?`${displayDay(new Date(n.dueAt))} ${n.allDay?'全天':displayTime(new Date(n.dueAt))}`:n.needsReview?'時間待確認':'無期限待辦';
 
+function localDetectedNotice(item:api.DetectedNotification,raw:string,sourcePolicy:ReturnType<typeof api.notificationPolicy>,forceReview=false):Notice|null{
+  const inferred=inferLiveNotification(raw,item.receivedAt);
+  if(!inferred.actionable)return null;
+  let dueAt:string|null=null;try{dueAt=inferred.date?parseDate(inferred.date,inferred.time):null}catch{}
+  const todo=!dueAt&&inferred.checklist.length>0;
+  const title=(inferred.title||item.text.split(/\n/).map(x=>x.replace(/^\[\d+ 秒前]\s*/, '').trim()).find(Boolean)||item.title||'待確認事項').slice(0,100);
+  return {id:id(),title,source:`[自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,category:inferred.category,dueAt,allDay:!!dueAt&&!inferred.time,needsReview:forceReview||sourcePolicy==='ai_required'||inferred.warnings.length>0||!dueAt&&!todo,assignee:'我',checklist:inferred.checklist.map(text=>({id:id(),text,done:false})),done:false,remindMinutes:dueAt&&!forceReview&&item.score>=9?60:null,createdAt:new Date(item.receivedAt).toISOString(),updatedAt:new Date().toISOString(),history:[],importance:item.score>=12?'urgent':item.score>=9?'important':'normal'};
+}
+
 function aiNotice(decision:AiDecision,item:api.DetectedNotification,raw:string):Notice|null{
   if(decision.type==='ignore_notification'||decision.type==='update_existing_event'||decision.type==='cancel_existing_event'||decision.type==='complete_existing_task')return null;
   const now=new Date().toISOString(),createdAt=new Date(item.receivedAt).toISOString();
@@ -52,6 +61,10 @@ function Main(){
   const [selected,setSelected]=useState<string|null>(null);
   const [policy,setPolicy]=useState(false);
   const [listenerEnabled,setListenerEnabled]=useState(false);
+  const [listenerConnected,setListenerConnected]=useState(false);
+  const [pendingCount,setPendingCount]=useState(0);
+  const [captureMessage,setCaptureMessage]=useState('');
+  const [importing,setImporting]=useState(false);
   const [detailMore,setDetailMore]=useState(false);
   const [defaultReminder,setDefaultReminder]=useState<number|null>(60);
   const refreshSettings=async()=>{setDefaultReminder(await api.getDefaultReminder())};
@@ -74,37 +87,42 @@ function Main(){
   const doImportDetected=async(base?:State)=>{
     if(lock.current)return base??live.current;
     if(!api.notificationListenerSupported())return base??live.current;
-    setListenerEnabled(api.notificationListenerEnabled());
+    const listenerReady=api.notificationListenerEnabled(),listenerOnline=api.notificationListenerConnected();
+    setListenerEnabled(listenerReady);setListenerConnected(listenerOnline);
+    if(listenerReady&&!listenerOnline)api.reconnectNotificationListener();
     const calendarEnabled=await api.getAutoCalendarEnabled();
-    let settings=await api.getAiSettings();
-    let key=settings.enabled?await api.getOpenAiKey():null;
-    if(settings.enabled&&!key){settings={...settings,enabled:false};await api.setAiSettings(settings)}
-    // Drain the oldest queued notifications first so a busy chat cannot permanently
-    // starve an earlier potentially important item. Twelve calls per activation caps cost.
-    const detected=api.getDetectedNotifications().sort((a,b)=>a.receivedAt-b.receivedAt).slice(0,12);
-    if(!detected.length)return base??live.current;
+    const settings=await api.getAiSettings();
+    const key=settings.enabled?await api.getOpenAiKey():null;
+    let missingKey=false;
+    if(settings.enabled&&!key){missingKey=true;setImportIssue('AI 已開啟但找不到 API key；明確行程會先放到待確認，其餘通知會保留。')}
+    // A larger bounded batch prevents a noisy chat from starving other apps. One
+    // shared AI/network failure trips a circuit breaker for the rest of this pass.
+    const detected=api.getDetectedNotifications().sort((a,b)=>a.receivedAt-b.receivedAt).slice(0,24);
+    setPendingCount(api.pendingDetectedCount());
+    if(!detected.length){setCaptureMessage('通知收件匣目前已整理完畢');return base??live.current;}
     let next=base??live.current;
-    const seen=new Set(next.notices.map(n=>n.source.match(/\[偵測ID:([^\]]+)\]/)?.[1]).filter(Boolean));
-    const processed:string[]=[];let changed=false,hadFailure=false;
+    const seen=new Set(next.notices.flatMap(n=>[...n.source.matchAll(/\[偵測ID:([^\]]+)\]/g)].map(match=>match[1])));
+    const processed:string[]=[];const resultNotifications:{notice:Notice;kind:'created'|'updated'|'cancelled'|'completed'}[]=[];
+    let changed=false,hadFailure=missingKey,aiUnavailable=false,created=0,updated=0,ignored=0,failed=0;
     for(const item of detected){
-      if(seen.has(item.id)){processed.push(item.id);continue}
+      if(seen.has(item.id)){processed.push(item.id);ignored++;continue}
       const raw=[item.title,item.text].filter(Boolean).join('\n').trim();
-      if(!raw){processed.push(item.id);continue}
+      if(!raw){processed.push(item.id);ignored++;continue}
       const sourcePolicy=api.notificationPolicy(item);
-      if(sourcePolicy==='ignore'&&!settings.enabled){processed.push(item.id);continue}
+      if(sourcePolicy==='ignore'&&!settings.enabled){processed.push(item.id);ignored++;continue}
       let made:Notice|null=null;
-      if(settings.enabled&&key){
+      if(settings.enabled&&key&&!aiUnavailable){
         try{
           const decision=await analyzeNotificationWithAI({apiKey:key,model:settings.model,appName:item.appName,title:item.title,text:item.text,receivedAt:item.receivedAt,existing:next.notices});
-          if(decision.type==='ignore_notification'){processed.push(item.id);continue}
+          if(decision.type==='ignore_notification'){processed.push(item.id);ignored++;continue}
           if(decision.type==='update_existing_event'){
             const old=next.notices.find(n=>n.id===decision.eventId);
             if(old){
               const source=`${old.source}\n\n[AI 更正來源｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
               next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{title:decision.title??n.title,dueAt:decision.startAt??n.dueAt,endAt:decision.endAt??(decision.startAt?null:n.endAt),location:decision.location??n.location,remindMinutes:decision.reminderMinutes??n.remindMinutes,source,needsReview:decision.confidence<0.9,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance,replySuggestions:decision.replySuggestions}):n)};
-              const updatedNotice=next.notices.find(n=>n.id===old.id);if(updatedNotice)void api.notifyDetectionResult(updatedNotice,'updated').catch(()=>{});
+              const updatedNotice=next.notices.find(n=>n.id===old.id);if(updatedNotice)resultNotifications.push({notice:updatedNotice,kind:'updated'});
               if(calendarEnabled&&decision.confidence>=0.9){const updated=next.notices.find(n=>n.id===old.id);if(updated?.dueAt)try{await api.addToSystemCalendar(updated)}catch{hadFailure=true;setImportIssue('App 內已更新，手機行事曆未能更新，請從詳情重試。')}}
-              changed=true;processed.push(item.id);continue;
+              changed=true;updated++;processed.push(item.id);continue;
             }
           }
           if(decision.type==='cancel_existing_event'||decision.type==='complete_existing_task'){
@@ -112,51 +130,67 @@ function Main(){
             if(old){
               const source=`${old.source}\n\n[AI 狀態更新｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
               next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,source,needsReview:false,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.type==='cancel_existing_event'?decision.importance:n.importance,replySuggestions:decision.replySuggestions}):n)};
-              const finished=next.notices.find(n=>n.id===old.id);if(finished)void api.notifyDetectionResult(finished,decision.type==='cancel_existing_event'?'cancelled':'completed').catch(()=>{});
-              changed=true;processed.push(item.id);continue;
+              const finished=next.notices.find(n=>n.id===old.id);if(finished)resultNotifications.push({notice:finished,kind:decision.type==='cancel_existing_event'?'cancelled':'completed'});
+              changed=true;updated++;processed.push(item.id);continue;
             }
           }
           made=aiNotice(decision,item,raw);
-        }catch{hadFailure=true;setImportIssue('AI 暫時無法分析，通知已保留，稍後重新整理。');break;}
+        }catch(e){
+          failed++;hadFailure=true;
+          const attempts=await api.recordDetectionFailure(item.id);
+          const reason=e instanceof Error?e.message:'AI 分析失敗';
+          aiUnavailable=/逾時|無法連線|額度|請求太頻繁|服務暫時|API key|金鑰|模型權限/.test(reason);
+          setImportIssue(`AI 暫時無法分析（第 ${attempts} 次）；可本機判定的內容已放到待確認，其餘通知仍保留。`);
+          made=localDetectedNotice(item,raw,sourcePolicy,true);
+          if(!made)continue;
+        }
+      }else if(settings.enabled){
+        made=localDetectedNotice(item,raw,sourcePolicy,true);
+        if(!made)continue;
       }
 
       if(!made){
-        const inferred=inferLiveNotification(raw,item.receivedAt);
-        if(!inferred.actionable){processed.push(item.id);continue}
-        let dueAt:string|null=null;try{dueAt=inferred.date?parseDate(inferred.date,inferred.time):null}catch{}
-        const todo=!dueAt&&inferred.checklist.length>0;
-        const title=(inferred.title||item.text.split(/\n/).find(Boolean)||item.title||'待辦事項').slice(0,100);
-        made={id:id(),title,source:`[自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,category:inferred.category,dueAt,allDay:!!dueAt&&!inferred.time,needsReview:sourcePolicy==='ai_required'||inferred.warnings.length>0||!dueAt&&!todo,assignee:'我',checklist:inferred.checklist.map(text=>({id:id(),text,done:false})),done:false,remindMinutes:dueAt&&item.score>=9?60:null,createdAt:new Date(item.receivedAt).toISOString(),updatedAt:new Date().toISOString(),history:[],importance:item.score>=12?'urgent':item.score>=9?'important':'normal'};
+        made=localDetectedNotice(item,raw,sourcePolicy);
+        if(!made){processed.push(item.id);ignored++;continue}
       }
       next={...next,notices:[made,...next.notices]};changed=true;
-      try{if(!await api.notifyDetectionResult(made,'created')){hadFailure=true;setImportIssue('行程已建立，但通知權限未開啟；請到設定允許通知。')}}catch{hadFailure=true;setImportIssue('行程已建立，但即時通知發送失敗；請到設定發送測試提醒。')}
+      created++;resultNotifications.push({notice:made,kind:'created'});
       const trusted=made.dueAt&&!made.needsReview&&(made.aiConfidence!==undefined?made.aiConfidence>=0.9:item.score>=9);
       if(calendarEnabled&&trusted){try{await api.addToSystemCalendar(made,`detected-${item.id}`)}catch{hadFailure=true;setImportIssue('項目已保存在 App，但手機行事曆寫入失敗，請檢查行事曆權限及帳戶。')}}
       processed.push(item.id);
     }
     if(changed){await api.persist(next);live.current=next;setData(next);try{await api.syncReminders(next.notices)}catch{}}
-    if(processed.length)api.markDetectedNotificationsProcessed(processed);
+    if(processed.length){api.markDetectedNotificationsProcessed(processed);await api.clearDetectionFailures(processed)}
+    for(const result of resultNotifications){
+      try{if(!await api.notifyDetectionResult(result.notice,result.kind)){hadFailure=true;setImportIssue('項目已保存，但通知權限未開啟；請到設定允許通知。');break}}
+      catch{hadFailure=true;setImportIssue('項目已保存，但結果通知發送失敗；請到設定發送測試提醒。');break}
+    }
+    const remaining=api.pendingDetectedCount();setPendingCount(remaining);
+    setCaptureMessage(created||updated||ignored||failed?`本次新增 ${created}、更新 ${updated}、略過 ${ignored}${failed?`、失敗 ${failed}`:''}${remaining?`；尚有 ${remaining} 則待整理`:''}`:remaining?`尚有 ${remaining} 則通知待整理`:'通知收件匣目前已整理完畢');
     if(!hadFailure)setImportIssue('');
     return next;
   };
 
   const importDetected=(base?:State):Promise<State>=>{
     if(importPromise.current)return importPromise.current;
+    setImporting(true);
     const task=doImportDetected(base);importPromise.current=task;
-    return task.finally(()=>{if(importPromise.current===task)importPromise.current=null});
+    return task.finally(()=>{if(importPromise.current===task)importPromise.current=null;setImporting(false);setPendingCount(api.pendingDetectedCount())});
   };
 
   const reload=async()=>{
     try{
       const d=await api.load();live.current=d;setData(d);setLoadError('');setReady(true);
       setListenerEnabled(api.notificationListenerEnabled());
+      setListenerConnected(api.notificationListenerConnected());
+      setPendingCount(api.pendingDetectedCount());
       void importDetected(d).then(merged=>api.syncReminders(merged.notices)).catch(()=>setImportIssue('自動整理暫時失敗，通知已保留。'));
     }catch{setLoadError('本機資料無法讀取。請重新載入。')}
   };
 
   useEffect(()=>{
     void reload();void refreshSettings().catch(()=>{});
-    const refresh=()=>{setListenerEnabled(api.notificationListenerEnabled());void importDetected().catch(()=>setImportIssue('自動整理暫時失敗，通知已保留。'));};
+    const refresh=()=>{setListenerEnabled(api.notificationListenerEnabled());setListenerConnected(api.notificationListenerConnected());void importDetected().catch(()=>setImportIssue('自動整理暫時失敗，通知已保留。'));};
     const app=AppState.addEventListener('change',state=>{if(state==='active')refresh()});
     const timer=setInterval(()=>{if(AppState.currentState==='active')refresh()},30000);
     let response:ReturnType<typeof Notifications.addNotificationResponseReceivedListener>|undefined;
@@ -235,17 +269,17 @@ function Main(){
 
   return <SafeAreaView style={s.root}>
     <StatusBar style="dark"/>
-    <View style={s.top}>{tab==='manual'?<Pressable accessibilityRole="button" onPress={()=>void leaveManual()} style={s.row}><Icon name="chevron-back"/><Text style={s.brand}>返回</Text></Pressable>:<View style={s.row}><View style={s.logo}><Icon name="calendar" color="white" size={19}/></View><Text style={s.brand}>生活通知管家</Text></View>}{tab!=='manual'&&Platform.OS==='android'?<View style={s.listenerPill}><View style={[s.statusDot,listenerEnabled&&s.statusDotOn]}/><Text style={s.listenerText}>{listenerEnabled?'運作中':'未啟用'}</Text></View>:null}</View>
+    <View style={s.top}>{tab==='manual'?<Pressable accessibilityRole="button" onPress={()=>void leaveManual()} style={s.row}><Icon name="chevron-back"/><Text style={s.brand}>返回</Text></Pressable>:<View style={s.row}><View style={s.logo}><Icon name="calendar" color="white" size={19}/></View><Text style={s.brand}>生活通知管家</Text></View>}{tab!=='manual'&&Platform.OS==='android'?<Pressable accessibilityRole="button" onPress={()=>setTab('settings')} style={s.listenerPill}><View style={[s.statusDot,listenerEnabled&&listenerConnected&&s.statusDotOn]}/><Text style={s.listenerText}>{!listenerEnabled?'未啟用':listenerConnected?'運作中':'重新連線'}</Text></Pressable>:null}</View>
 
     <KeyboardAvoidingView style={s.flex} behavior={Platform.OS==='ios'?'padding':undefined}>
       <ScrollView ref={scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-        {tab==='home'&&<HomeDashboard notices={data.notices} onOpen={setSelected} onToggle={toggle} onAdd={startManual} onCapture={type=>{startManual();if(type==='image')pickImage();else pasteText()}} onCalendar={()=>setTab('calendar')} onSettings={()=>setTab('settings')} listenerEnabled={Platform.OS!=='android'||listenerEnabled} issue={importIssue}/>}
+        {tab==='home'&&<HomeDashboard notices={data.notices} onOpen={setSelected} onToggle={toggle} onAdd={startManual} onCapture={type=>{startManual();if(type==='image')pickImage();else pasteText()}} onCalendar={()=>setTab('calendar')} onSettings={()=>setTab('settings')} onRefresh={()=>void importDetected().catch(()=>setImportIssue('自動整理暫時失敗，通知已保留。'))} listenerEnabled={Platform.OS!=='android'||listenerEnabled} listenerConnected={Platform.OS!=='android'||listenerConnected} pendingCount={pendingCount} captureMessage={captureMessage} importing={importing} issue={importIssue}/>}
 
         {tab==='calendar'&&<MonthCalendar notices={data.notices} onOpen={setSelected} onAdd={addForDate}/>}
 
         {tab==='manual'&&<EventEditor draft={draft} patch={patchDraft} onImage={pickImage} onPaste={pasteText} onSave={save} busy={busy} message={message} warnings={warnings}/>}
 
-        {tab==='settings'&&<SettingsPanel data={data} onChange={refreshSettings} onRestore={restore} onPrivacy={()=>setPolicy(true)} onErase={()=>void run(async()=>{if(await confirm('永久清除此 App 的事件、截圖、金鑰及監聽設定？已加入手機行事曆的副本會保留。')){api.clearDetectedNotifications();await api.erase();const next={...EMPTY,members:['我'],notices:[],welcomed:true};await api.persist(next);live.current=next;setData(next);setListenerEnabled(false);setSelected(null);setTab('home');await refreshSettings();}})}/>}
+    {tab==='settings'&&<SettingsPanel data={data} onChange={async()=>{await refreshSettings();setListenerEnabled(api.notificationListenerEnabled());setListenerConnected(api.notificationListenerConnected());setPendingCount(api.pendingDetectedCount())}} onRestore={restore} onPrivacy={()=>setPolicy(true)} onErase={()=>void run(async()=>{if(await confirm('永久清除此 App 的事件、截圖、金鑰及監聽設定？已加入手機行事曆的副本會保留。')){api.clearDetectedNotifications();await api.erase();const next={...EMPTY,members:['我'],notices:[],welcomed:true};await api.persist(next);live.current=next;setData(next);setListenerEnabled(false);setListenerConnected(false);setPendingCount(0);setSelected(null);setTab('home');await refreshSettings();}})}/>}
 
       </ScrollView>
     </KeyboardAvoidingView>

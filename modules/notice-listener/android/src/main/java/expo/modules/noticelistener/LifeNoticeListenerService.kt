@@ -29,22 +29,23 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val HIGH_INTENT = Regex("截止|最晚|到期|繳交|繳費|繳款|付款|取件|領取|取貨|集合|報名|預約|會議|開會|面試|上課|考試|比賽|登機|出發|看診|門診|回診|訂位|入住|退房")
     private val TASK_INTENT = Regex("填寫|回覆|提交|完成|準備|攜帶|帶上|聯絡|寄送|繳交|繳費|付款|領取|取件|報名|預約|購買|買|訂購|確認")
     private val EVENT = Regex("活動|課程|講座|聚餐|會議|比賽|考試|面試|預約|看診|回診|集合|出發|登機|訂位")
-    private val SOCIAL_PLAN = Regex("吃飯|吃早餐|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|羽球|籃球|棒球|運動|練球|唱歌|逛街|約一下|約嗎|要不要|一起|吃這家|去這家")
+    private val SOCIAL_PLAN = Regex("吃飯|吃早餐|吃東西|吃好吃的|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|羽球|籃球|棒球|運動|練球|唱歌|逛街|約一下|約嗎|要不要|一起|吃這家|去這家")
     private val ACTION = Regex("請|需要|需|須|務必|記得|別忘|回覆|填寫|完成|提交|繳|帶|攜帶|準備|確認|參加|出席|領取|取件|付款|報名|預約")
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
     private val HARD_IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|VPN|截圖已儲存", RegexOption.IGNORE_CASE)
     private val IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|Samsung Rewards|Rewards|獲得\\s*\\d+\\s*點|點數到帳|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|已連線|VPN|截圖已儲存|廣告|優惠券|限時優惠|促銷|折扣|猜你喜歡|熱門新聞", RegexOption.IGNORE_CASE)
     private val EXPLICIT_AD = Regex("\\b(?:sponsored|advertisement)\\b|贊助內容|付費廣告|此為廣告", RegexOption.IGNORE_CASE)
-    private val SOCIAL_NOISE = Regex("按讚了你的|對你的.*表示|開始追蹤你|追蹤了你|查看了你的|新增了限時動態|發佈了新貼文|推薦你追蹤|你可能認識|liked your|started following|new post from", RegexOption.IGNORE_CASE)
-    private val NEWS_NOISE = Regex("熱門新聞|推薦文章|每日精選|焦點新聞|即時新聞|今日頭條|為你推薦")
+    private val SOCIAL_NOISE = Regex("按讚了你的|對你的.*表示|開始追蹤你|追蹤了你|查看了你的|新增了限時動態|發佈了新貼文|推薦你追蹤|你可能認識|有人發佈了|正在直播|liked your|reacted to your|started following|new post from|is live", RegexOption.IGNORE_CASE)
+    private val NEWS_NOISE = Regex("熱門新聞|推薦文章|每日精選|焦點新聞|即時新聞|今日頭條|為你推薦|今日推薦|編輯精選|你可能有興趣")
     private val PERSONAL = Regex("您的?(?:訂單|預約|訂位|掛號|航班|車次|包裹|帳單)|已(?:預約|訂位|報名|付款|繳費|出貨|到店|取件)|面試通知|錄取通知|會議邀請|行事曆邀請|付款期限|繳費期限")
     private val SCHEDULE = Regex("(?:今天|今晚|明天|明晚|後天|週[一二三四五六日天]|星期[一二三四五六日天])[^\\n]{0,40}(?:\\d{1,2}\\s*[:：.．點時]|早上|上午|中午|下午|晚上|晚間)[^\\n]{0,50}(?:吃|去|見面|碰面|開會|會議|上課|考試|面試|看診|預約|訂位|打球|運動|集合|出發|要不要|一起)")
     private val PROMO = listOf(
       Regex("限時(?:優惠|特價|搶購)?"), Regex("優惠券|折價券|優惠碼|折扣碼"),
       Regex("促銷|特價|下殺|買一送一|滿額|免運"), Regex("全館|全站|會員專屬|會員好康"),
       Regex("立即(?:購買|下單|搶購|領取)|馬上(?:購買|下單|搶購)"), Regex("\\d+\\s*折|折抵\\s*\\d+|現省\\s*\\d+"),
-      Regex("購物優惠|新品上市|熱賣|開賣|最後倒數")
+      Regex("購物優惠|新品上市|熱賣|開賣|最後倒數|限量|限定|好康|回饋|加碼|開搶|領券"),
+      Regex("(?:NTD?|新台幣|＄)\\s*\\d+|省下|最低價|優惠價|特惠價", RegexOption.IGNORE_CASE)
     )
     private const val GMAIL_PACKAGE = "com.google.android.gm"
     private val GMAIL_SUMMARY = Regex("\\b\\d+\\s*封新郵件\\b|\\b\\d+\\s+new\\s+emails?\\b|new mail summary", RegexOption.IGNORE_CASE)
@@ -53,6 +54,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val GMAIL_IMMEDIATE = Regex("邀請您|邀請你|面試通知|預約成功|訂位成功|報名成功|繳費通知|付款期限|會議邀請|calendar invitation|meeting invitation|(?:今天|明天|後天)[^\\n]{0,30}(?:開會|會議|面試|考試|上課|看診|預約)", RegexOption.IGNORE_CASE)
 
     fun canReply(context: Context, noticeId: String): Boolean = current?.replyActionFor(context, noticeId) != null
+    fun isConnected(): Boolean = current != null
 
     fun reply(context: Context, noticeId: String, text: String): Boolean {
       if (text.isBlank()) return false
@@ -100,7 +102,17 @@ class LifeNoticeListenerService : NotificationListenerService() {
       if (PERSONAL.containsMatchIn(text) || SCHEDULE.containsMatchIn(text)) return false
       if (EXPLICIT_AD.containsMatchIn(text) || SOCIAL_NOISE.containsMatchIn(text) || NEWS_NOISE.containsMatchIn(text)) return true
       val hits = PROMO.count { it.containsMatchIn(text) }
-      return hits >= 3 || (hits >= 2 && Regex("立即|馬上|點擊|領取|購買|下單|搶購|查看詳情|前往").containsMatchIn(text))
+      return hits >= 2
+    }
+
+    internal fun canAutoCaptureText(text: String, score: Int, sourcePackage: String): Boolean {
+      if (HARD_IGNORE.containsMatchIn(text) || isDefiniteJunkText(text)) return false
+      if (sourcePackage == GMAIL_PACKAGE && !GMAIL_PERSONAL.containsMatchIn(text)) return false
+      if (!PERSONAL.containsMatchIn(text) && PROMO.count { it.containsMatchIn(text) } >= 2) return false
+      val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
+      val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
+      val hasIntent = HIGH_INTENT.containsMatchIn(text) || EVENT.containsMatchIn(text) || SOCIAL_PLAN.containsMatchIn(text) || TASK_INTENT.containsMatchIn(text)
+      return score >= 10 && hasDate && hasTime && hasIntent
     }
 
     internal fun scoreText(text: String): Pair<Int, String> {
@@ -196,8 +208,9 @@ class LifeNoticeListenerService : NotificationListenerService() {
 
     if (hasReplyAction(notification)) ReplyTargetStore.save(applicationContext, item, sbn.key)
     if (DetectedStore.add(applicationContext, item)) {
-      // Recall-first AI candidates must be approved by the model before calendar write.
-      val addedToCalendar = !aiEnabled && DetectedStore.autoCalendar(applicationContext) && QuickCapture.capture(applicationContext, item).ok
+      // A strict local gate keeps explicit schedules useful while the app is closed.
+      // Ambiguous AI candidates remain queued and never write to Calendar directly.
+      val addedToCalendar = DetectedStore.autoCalendar(applicationContext) && canAutoCaptureText(text, score, sbn.packageName) && QuickCapture.capture(applicationContext, item).ok
       if (addedToCalendar || shouldNotifyNow(text, score, sbn.packageName)) notifyUser(item, addedToCalendar)
     }
   }

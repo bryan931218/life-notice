@@ -15,6 +15,7 @@ const AUTO_CALENDAR_KEY='life-notice-auto-calendar-v1';
 const AI_SETTINGS_KEY='life-notice-ai-settings-v1';
 const ALERT_LEVEL_KEY='life-notice-alert-level-v1';
 const OPENAI_KEY_KEY='life-notice-openai-key-v1';
+const DETECTION_FAILURES_KEY='life-notice-detection-failures-v1';
 const LUNA:AiModel='gpt-5.6-luna';
 export type AiSettings={enabled:boolean;model:AiModel};
 export type AlertLevel='important'|'balanced'|'all';
@@ -25,11 +26,13 @@ export function isObviousNoiseText(text:string){return OBVIOUS_NOISE.test(text);
 
 export type DetectedNotification={id:string;packageName:string;appName:string;title:string;text:string;receivedAt:number;score:number;reason:string};
 export function notificationPolicy(item:DetectedNotification){return gmailNotificationPolicy(item.packageName,item.title,item.text);}
-const listener=Platform.OS==='android'?requireOptionalNativeModule<{isEnabled():boolean;hasListenerPermission():boolean;getMonitoredCount():number;openSettings():void;requestQuickTile():boolean;getDetected():DetectedNotification[];markProcessed(ids:string[]):void;clearDetected():void;resetLocal():void;setAiMode(enabled:boolean):void;setAlertLevel(level:string):void;setAutoCalendar(enabled:boolean):void;addCalendarEvent(title:string,startAt:number,endAt:number,allDay:boolean,description:string,location:string,syncKey:string):string}>('NoticeListener'):null;
+const listener=Platform.OS==='android'?requireOptionalNativeModule<{isEnabled():boolean;isConnected():boolean;hasListenerPermission():boolean;getMonitoredCount():number;openSettings():void;reconnect():boolean;requestQuickTile():boolean;getDetected():DetectedNotification[];markProcessed(ids:string[]):void;clearDetected():void;resetLocal():void;setAiMode(enabled:boolean):void;setAlertLevel(level:string):void;setAutoCalendar(enabled:boolean):void;addCalendarEvent(title:string,startAt:number,endAt:number,allDay:boolean,description:string,location:string,syncKey:string):string}>('NoticeListener'):null;
 export function notificationListenerSupported(){return Platform.OS==='android'&&!!listener;}
 export function monitoredAppCount(){return listener?.getMonitoredCount()??0;}
 export function notificationListenerPermission(){return !!listener?.hasListenerPermission();}
 export function notificationListenerEnabled(){return !!listener?.isEnabled();}
+export function notificationListenerConnected(){return !!listener?.isConnected();}
+export function reconnectNotificationListener(){return !!listener?.reconnect();}
 export function openNotificationListenerSettings(){if(!listener)throw new Error(Platform.OS==='ios'?'iPhone 無法讀取其他 App 的通知；請改用分享或截圖匯入。':'此版本尚未包含通知自動讀取模組。');listener.openSettings();}
 export function requestQuickCaptureTile(){if(!listener)throw new Error('快速擷取只支援 Android 原生版。');return listener.requestQuickTile();}
 export function getDetectedNotifications():DetectedNotification[]{
@@ -42,6 +45,28 @@ export function getDetectedNotifications():DetectedNotification[]{
 }
 export function markDetectedNotificationsProcessed(ids:string[]){listener?.markProcessed(ids);}
 export function clearDetectedNotifications(){listener?.clearDetected();}
+export function pendingDetectedCount(){return listener?.getDetected().length??0;}
+
+type DetectionFailure={count:number;lastAt:number};
+async function detectionFailures():Promise<Record<string,DetectionFailure>>{
+  try{
+    const parsed=JSON.parse(await AsyncStorage.getItem(DETECTION_FAILURES_KEY)||'{}') as Record<string,DetectionFailure>;
+    const cutoff=Date.now()-7*86400000;
+    return Object.fromEntries(Object.entries(parsed).filter(([id,value])=>id&&value&&Number.isInteger(value.count)&&value.count>0&&value.lastAt>=cutoff).slice(-120));
+  }catch{return {};}
+}
+export async function recordDetectionFailure(id:string){
+  const current=await detectionFailures(),previous=current[id];
+  current[id]={count:Math.min(3,(previous?.count??0)+1),lastAt:Date.now()};
+  await AsyncStorage.setItem(DETECTION_FAILURES_KEY,JSON.stringify(current));
+  return current[id].count;
+}
+export async function clearDetectionFailures(ids:string[]){
+  if(!ids.length)return;
+  const current=await detectionFailures();let changed=false;
+  for(const id of ids)if(id in current){delete current[id];changed=true;}
+  if(changed)await AsyncStorage.setItem(DETECTION_FAILURES_KEY,JSON.stringify(current));
+}
 
 export async function getAiSettings():Promise<AiSettings>{
   const raw=await AsyncStorage.getItem(AI_SETTINGS_KEY);let enabled=false;
@@ -145,4 +170,4 @@ export async function exportFile(name:string,content:string,type:string){if(Plat
 export async function exportBackup(s:State){const clean=validateBackup(s);await exportFile('life-notice-backup.json',JSON.stringify(clean,null,2),'application/json');}
 export async function exportCalendar(n:Notice){await exportFile('life-notice.ics',toCalendar(n),'text/calendar');}
 export async function shareNotice(n:Notice){await Share.share({title:n.title,message:`${n.title}\n${n.dueAt?new Date(n.dueAt).toLocaleString('zh-TW'):'尚未設定日期'}\n${n.checklist.map(c=>`${c.done?'☑':'□'} ${c.text}`).join('\n')}\n\n原始通知：\n${n.source}`});}
-export async function erase(){await queue;listener?.resetLocal();if(Platform.OS!=='web'){await Notifications.cancelAllScheduledNotificationsAsync();await FS.deleteAsync(FS.documentDirectory+'sources/',{idempotent:true});for(const name of ['life-notice-backup.json','life-notice.ics'])await FS.deleteAsync(FS.cacheDirectory+name,{idempotent:true});}await AsyncStorage.multiRemove([KEY,AUTO_CALENDAR_KEY,AI_SETTINGS_KEY,ALERT_LEVEL_KEY,DEFAULT_REMINDER_KEY]);if(Platform.OS!=='web')await SecureStore.deleteItemAsync(OPENAI_KEY_KEY);listener?.setAiMode(false);listener?.setAlertLevel('important');}
+export async function erase(){await queue;listener?.resetLocal();if(Platform.OS!=='web'){await Notifications.cancelAllScheduledNotificationsAsync();await FS.deleteAsync(FS.documentDirectory+'sources/',{idempotent:true});for(const name of ['life-notice-backup.json','life-notice.ics'])await FS.deleteAsync(FS.cacheDirectory+name,{idempotent:true});}await AsyncStorage.multiRemove([KEY,AUTO_CALENDAR_KEY,AI_SETTINGS_KEY,ALERT_LEVEL_KEY,DEFAULT_REMINDER_KEY,DETECTION_FAILURES_KEY]);if(Platform.OS!=='web')await SecureStore.deleteItemAsync(OPENAI_KEY_KEY);listener?.setAiMode(false);listener?.setAlertLevel('important');}

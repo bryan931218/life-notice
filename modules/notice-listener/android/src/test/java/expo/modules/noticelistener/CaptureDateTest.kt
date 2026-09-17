@@ -18,4 +18,7 @@ class CaptureDateTest {
   @Test fun aiModeUsesRecallFirstFilter(){assertTrue(LifeNoticeListenerService.isCandidateText("晚點再跟你確認細節",true))}
   @Test fun definiteAdsAreDropped(){assertTrue(LifeNoticeListenerService.isDefiniteJunkText("會員專屬限時優惠，全館五折，立即下單再享免運"))}
   @Test fun personalPlansSurviveAdFilter(){assertFalse(LifeNoticeListenerService.isDefiniteJunkText("明天下午3點開會討論廣告企劃"));assertFalse(LifeNoticeListenerService.isDefiniteJunkText("今天吃好吃的\n在星月廣場\n我們訂20：15"))}
+  @Test fun strictBackgroundCaptureAcceptsCompletePlan(){val text="今天吃好吃的\n在星月廣場\n我們訂20：15";val score=LifeNoticeListenerService.scoreText(text).first;assertTrue(LifeNoticeListenerService.canAutoCaptureText(text,score,"jp.naver.line.android"))}
+  @Test fun strictBackgroundCaptureRejectsMarketingAndAmbiguity(){val ad="今日限定好康，會員專屬加碼回饋，領券後前往賣場";assertFalse(LifeNoticeListenerService.canAutoCaptureText(ad,20,"com.shop"));val vague="明天晚上再說";assertFalse(LifeNoticeListenerService.canAutoCaptureText(vague,LifeNoticeListenerService.scoreText(vague).first,"jp.naver.line.android"))}
+  @Test fun conversationTitleIgnoresUnreadCounter(){assertEquals("林安玲",ConversationBufferStore.normalizeTitle("林安玲（3 則新訊息）"));assertEquals("family 2",ConversationBufferStore.normalizeTitle("Family 2"))}
 }

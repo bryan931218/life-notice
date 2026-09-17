@@ -17,7 +17,7 @@ import android.view.View
 import android.widget.*
 
 class AppFilterActivity:Activity(){
- private val commonMessagingPackages=setOf("jp.naver.line.android","com.facebook.orca","com.instagram.android","com.whatsapp","org.telegram.messenger")
+ private val commonMessagingPackages=setOf("jp.naver.line.android","com.facebook.orca","com.instagram.android","com.whatsapp","org.telegram.messenger","com.google.android.gm","com.google.android.apps.messaging","com.samsung.android.messaging","com.discord","com.tencent.mm","com.viber.voip")
  private val green=Color.rgb(39,94,78)
  private val ink=Color.rgb(34,60,53)
  private val muted=Color.rgb(107,126,121)
