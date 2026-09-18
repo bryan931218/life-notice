@@ -12,7 +12,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as FS from 'expo-file-system/legacy';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import {EMPTY,dateFields,id,inferLiveNotification,parseDate,updateNotice,validateBackup,type Notice,type State} from './domain';
+import {EMPTY,dateFields,id,inferLiveNotification,inferLocationText,parseDate,updateNotice,validateBackup,type Notice,type State} from './domain';
 import {analyzeNotificationWithAI,analyzeScreenshotWithAI,type AiDecision} from './ai';
 import * as api from './services';
 import {Button,Icon,confirm,notify,p,s} from './ui';
@@ -20,29 +20,30 @@ import {MonthCalendar} from './calendar-ui';
 import {privacy} from './privacy';
 import {canReplyToNotification,replyToNotification} from './reply';
 import {displayLocation,extractUrls,firstGoogleMapsUrl,googleMapsSearchUrl,isGoogleMapsUrl,linkHost} from './links';
+import {isLikelyCalendarText} from './notification-filter';
 
 type Tab='home'|'calendar'|'manual'|'settings';
 const blank=():Draft=>({title:'',source:'',category:'生活',date:'',time:'',endTime:'',endDate:'',location:'',assignee:'我',checks:'',remind:60});
 const isAuto=(n:Notice)=>/^\[(?:AI)?自動偵測｜/.test(n.source);
 const stripDetectedId=(source:string)=>source.replace(/\n\[偵測ID:[^\]]+\]$/,'');
-const whenLabel=(n:Notice)=>n.dueAt?`${displayDay(new Date(n.dueAt))} ${n.allDay?'全天':displayTime(new Date(n.dueAt))}`:n.needsReview?'時間待確認':'無期限待辦';
+const whenLabel=(n:Notice)=>n.dueAt?`${displayDay(new Date(n.dueAt))} ${n.allDay?'全天':displayTime(new Date(n.dueAt))}`:'時間待確認';
 
 function localDetectedNotice(item:api.DetectedNotification,raw:string,sourcePolicy:ReturnType<typeof api.notificationPolicy>,forceReview=false):Notice|null{
+  if(!isLikelyCalendarText(raw))return null;
   const inferred=inferLiveNotification(raw,item.receivedAt);
-  if(!inferred.actionable)return null;
   let dueAt:string|null=null;try{dueAt=inferred.date?parseDate(inferred.date,inferred.time):null}catch{}
-  const todo=!dueAt&&inferred.checklist.length>0;
-  const title=(inferred.title||item.text.split(/\n/).map(x=>x.replace(/^\[\d+ 秒前]\s*/, '').trim()).find(Boolean)||item.title||'待確認事項').slice(0,100);
-  return {id:id(),title,source:`[自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,category:inferred.category,dueAt,allDay:!!dueAt&&!inferred.time,needsReview:forceReview||sourcePolicy==='ai_required'||inferred.warnings.length>0||!dueAt&&!todo,assignee:'我',checklist:inferred.checklist.map(text=>({id:id(),text,done:false})),done:false,remindMinutes:dueAt&&!forceReview&&item.score>=9?60:null,createdAt:new Date(item.receivedAt).toISOString(),updatedAt:new Date().toISOString(),history:[],importance:item.score>=12?'urgent':item.score>=9?'important':'normal'};
+  if(!dueAt)return null;
+  const title=(inferred.title||item.text.split(/\n/).map(x=>x.replace(/^\[\d+\s*(?:秒|分鐘|小時)前]\s*/, '').trim()).find(Boolean)||item.title||'待確認行程').slice(0,100);
+  return {id:id(),title,source:`[自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,category:inferred.category,dueAt,allDay:!inferred.time,location:inferLocationText(raw)||undefined,needsReview:forceReview||sourcePolicy==='ai_required'||inferred.warnings.length>0,assignee:'我',checklist:inferred.checklist.map(text=>({id:id(),text,done:false})),done:false,remindMinutes:!forceReview&&item.score>=9?60:null,createdAt:new Date(item.receivedAt).toISOString(),updatedAt:new Date().toISOString(),history:[],importance:item.score>=12?'urgent':item.score>=9?'important':'normal'};
 }
 
 function aiNotice(decision:AiDecision,item:api.DetectedNotification,raw:string):Notice|null{
-  if(decision.type==='ignore_notification'||decision.type==='update_existing_event'||decision.type==='cancel_existing_event'||decision.type==='complete_existing_task')return null;
+  if(decision.type==='ignore_notification'||decision.type==='update_existing_event'||decision.type==='cancel_existing_event')return null;
   const now=new Date().toISOString(),createdAt=new Date(item.receivedAt).toISOString();
   const common={id:id(),source:`[AI自動偵測｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`,assignee:'我',done:false,createdAt,updatedAt:now,history:[],aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance,replySuggestions:'replySuggestions' in decision?decision.replySuggestions:[]};
   if(decision.type==='create_calendar_event')return {...common,title:decision.title,category:decision.category,dueAt:decision.startAt,endAt:decision.endAt,allDay:decision.allDay,location:decision.location??undefined,needsReview:decision.confidence<0.86,checklist:decision.checklist.map(text=>({id:id(),text,done:false})),remindMinutes:decision.importance==='normal'?null:decision.reminderMinutes};
-  if(decision.type==='create_task')return {...common,title:decision.title,category:decision.category,dueAt:decision.dueAt,needsReview:decision.confidence<0.65,checklist:decision.checklist.map(text=>({id:id(),text,done:false})),remindMinutes:decision.dueAt?decision.reminderMinutes:null};
-  return {...common,title:decision.title,category:decision.category,dueAt:decision.proposedAt,needsReview:true,checklist:[{id:id(),text:decision.question,done:false}],remindMinutes:null};
+  if(!decision.proposedAt)return null;
+  return {...common,title:decision.title,category:decision.category,dueAt:decision.proposedAt,needsReview:true,checklist:[],remindMinutes:null};
 }
 
 export default function App(){return <SafeAreaProvider><Main/></SafeAreaProvider>}
@@ -102,7 +103,7 @@ function Main(){
     if(!detected.length){setCaptureMessage('通知收件匣目前已整理完畢');return base??live.current;}
     let next=base??live.current;
     const seen=new Set(next.notices.flatMap(n=>[...n.source.matchAll(/\[偵測ID:([^\]]+)\]/g)].map(match=>match[1])));
-    const processed:string[]=[];const resultNotifications:{notice:Notice;kind:'created'|'updated'|'cancelled'|'completed'}[]=[];
+    const processed:string[]=[];const resultNotifications:{notice:Notice;kind:'created'|'updated'|'cancelled'}[]=[];
     let changed=false,hadFailure=missingKey,aiUnavailable=false,created=0,updated=0,ignored=0,failed=0;
     for(const item of detected){
       if(seen.has(item.id)){processed.push(item.id);ignored++;continue}
@@ -125,12 +126,12 @@ function Main(){
               changed=true;updated++;processed.push(item.id);continue;
             }
           }
-          if(decision.type==='cancel_existing_event'||decision.type==='complete_existing_task'){
+          if(decision.type==='cancel_existing_event'){
             const old=next.notices.find(n=>n.id===decision.eventId);
             if(old){
               const source=`${old.source}\n\n[AI 狀態更新｜${item.appName}]\n${raw}\n[偵測ID:${item.id}]`;
-              next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,source,needsReview:false,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.type==='cancel_existing_event'?decision.importance:n.importance,replySuggestions:decision.replySuggestions}):n)};
-              const finished=next.notices.find(n=>n.id===old.id);if(finished)resultNotifications.push({notice:finished,kind:decision.type==='cancel_existing_event'?'cancelled':'completed'});
+              next={...next,notices:next.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,source,needsReview:false,aiConfidence:decision.confidence,aiAction:decision.reason,importance:decision.importance,replySuggestions:decision.replySuggestions}):n)};
+              const finished=next.notices.find(n=>n.id===old.id);if(finished)resultNotifications.push({notice:finished,kind:'cancelled'});
               changed=true;updated++;processed.push(item.id);continue;
             }
           }
@@ -212,8 +213,14 @@ function Main(){
   useEffect(()=>{const sub=BackHandler.addEventListener('hardwareBackPress',()=>{if(tab!=='manual')return false;void leaveManual();return true;});return()=>sub.remove()},[tab,draft]);
   const applyInference=(source:string)=>{
     const r=inferLiveNotification(source,Date.now());
-    setDraft(d=>({...d,source,title:r.title,category:r.category,date:r.date,time:r.time,checks:r.checklist.join('\n')}));
-    setWarnings(!r.date&&r.actionable?['沒有偵測到期限，會建立成待辦。']:r.warnings.slice(0,2));
+    setDraft(d=>({...d,source,title:r.title,category:r.category,date:r.date,time:r.time,location:inferLocationText(source),checks:r.checklist.join('\n')}));
+    setWarnings(!r.date?['沒有找到可確認的行程日期，補上日期後才能儲存。']:r.warnings.slice(0,2));
+  };
+  const startFromText=(source:string)=>{
+    const text=source.trim().slice(0,20000),r=inferLiveNotification(text,Date.now());
+    openDraft({...blank(),remind:defaultReminder,source:text,title:r.title,category:r.category,date:r.date,time:r.time,location:inferLocationText(text),checks:r.checklist.join('\n')},'home');
+    setWarnings(!r.date?['沒有找到可確認的行程日期，補上日期後才能儲存。']:r.warnings.slice(0,2));
+    setMessage(r.date?'已依今天日期整理，確認後即可加入行程。':'請補上行程日期。');
   };
   const pasteText=()=>void run(async()=>{const text=(await Clipboard.getStringAsync()).slice(0,20000);if(!text.trim())throw new Error('剪貼簿沒有文字。');applyInference(text);setMessage('已整理剪貼簿內容。')});
   const pickImage=()=>void run(async()=>{
@@ -225,13 +232,14 @@ function Main(){
         const base64=await FS.readAsStringAsync(uri,{encoding:FS.EncodingType.Base64});
         const decision=await analyzeScreenshotWithAI({apiKey:key,model:settings.model,base64,mimeType:asset.mimeType||'image/jpeg',receivedAt:Date.now(),existing:live.current.notices});
         let raw='';try{raw=await api.recognize(uri)}catch{}
-        if(decision.type==='ignore_notification'){setDraft(d=>({...d,image:uri,source:raw}));setMessage('AI 判斷這張圖沒有需要建立的行程或待辦。');return}
+        if(decision.type==='ignore_notification'){setDraft(d=>({...d,image:uri,source:raw}));setMessage('AI 判斷這張圖沒有可建立的行程。');return}
         if(decision.type==='update_existing_event'){const old=live.current.notices.find(n=>n.id===decision.eventId);if(old){edit(old);const start=dateFields(decision.startAt??old.dueAt),end=dateFields(decision.endAt??(decision.startAt?null:old.endAt??null));patchDraft({title:decision.title??old.title,date:start.date,time:old.allDay?'':start.time,endDate:end.date,endTime:end.time,location:decision.location??old.location??'',remind:decision.reminderMinutes??old.remindMinutes,image:uri,source:raw});setMessage('已套用辨識到的更正，請確認後儲存。')}return}
-        if(decision.type==='cancel_existing_event'||decision.type==='complete_existing_task'){const old=live.current.notices.find(n=>n.id===decision.eventId);if(old&&await confirm(`將「${old.title}」標記為${decision.type==='cancel_existing_event'?'已取消':'已完成'}？`)){await commit({...live.current,notices:live.current.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,needsReview:false,aiAction:decision.reason}):n)});setDraft(blank());setTab(returnTab.current)}else setMessage('未套用狀態變更。');return}
-        const when=decision.type==='create_calendar_event'?decision.startAt:decision.type==='create_task'?decision.dueAt:decision.proposedAt;
-        const f=dateFields(when),checks=decision.type==='ask_user'?[decision.question]:decision.checklist;
-        setDraft(d=>({...d,image:uri,source:raw,title:decision.title,category:decision.category,date:f.date,time:decision.type==='create_calendar_event'&&decision.allDay?'':f.time,endTime:decision.type==='create_calendar_event'?dateFields(decision.endAt).time:'',endDate:decision.type==='create_calendar_event'?dateFields(decision.endAt).date:'',location:decision.type==='create_calendar_event'?decision.location??'':'',checks:checks.join('\n'),remind:decision.type==='create_calendar_event'?decision.reminderMinutes:decision.type==='create_task'?decision.reminderMinutes:null}));
-        setWarnings(decision.type==='ask_user'?[decision.question]:[]);setMessage(decision.type==='create_task'&&!decision.dueAt?'AI 已整理成無期限待辦。':'AI 已整理截圖。');return;
+        if(decision.type==='cancel_existing_event'){const old=live.current.notices.find(n=>n.id===decision.eventId);if(old&&await confirm(`將「${old.title}」標記為已取消？`)){await commit({...live.current,notices:live.current.notices.map(n=>n.id===old.id?updateNotice(n,{done:true,needsReview:false,aiAction:decision.reason}):n)});setDraft(blank());setTab(returnTab.current)}else setMessage('未套用狀態變更。');return}
+        const when=decision.type==='create_calendar_event'?decision.startAt:decision.proposedAt;
+        if(!when){setMessage('AI 沒有找到可確認的行程時間。');return}
+        const f=dateFields(when),checks=decision.type==='create_calendar_event'?decision.checklist:[];
+        setDraft(d=>({...d,image:uri,source:raw,title:decision.title,category:decision.category,date:f.date,time:decision.type==='create_calendar_event'&&decision.allDay?'':f.time,endTime:decision.type==='create_calendar_event'?dateFields(decision.endAt).time:'',endDate:decision.type==='create_calendar_event'?dateFields(decision.endAt).date:'',location:decision.type==='create_calendar_event'?decision.location??'':'',checks:checks.join('\n'),remind:decision.type==='create_calendar_event'?decision.reminderMinutes:null}));
+        setWarnings(decision.type==='ask_user'?[decision.question]:[]);setMessage('AI 已整理截圖中的行程。');return;
       }catch(e){setMessage(e instanceof Error?`AI 失敗：${e.message}`:'AI 分析失敗，已改用本機辨識。')}
     }
     const text=await api.recognize(uri);applyInference(text);setDraft(d=>({...d,image:uri}));if(!message)setMessage('已整理截圖。');
@@ -239,7 +247,7 @@ function Main(){
 
   const save=()=>void run(async()=>{
     const title=draft.title.trim();if(!title)throw new Error('請輸入名稱。');
-    const dueAt=parseDate(draft.date,draft.time),allDay=!!dueAt&&!draft.time.trim();
+    const dueAt=parseDate(draft.date,draft.time);if(!dueAt)throw new Error('請先設定行程日期。');const allDay=!draft.time.trim();
     if(draft.endDate&&draft.endDate!==draft.date&&!draft.endTime&&!allDay)throw new Error('填寫結束日期時，也需要結束時間。');
     const old=live.current.notices.find(n=>n.id===draft.editing);
     const endAt=dueAt&&!allDay&&draft.endTime.trim()?parseDate(draft.endDate||draft.date,draft.endTime):allDay&&old?.allDay&&old.dueAt===dueAt?old.endAt??null:null;
@@ -273,7 +281,7 @@ function Main(){
 
     <KeyboardAvoidingView style={s.flex} behavior={Platform.OS==='ios'?'padding':undefined}>
       <ScrollView ref={scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-        {tab==='home'&&<HomeDashboard notices={data.notices} onOpen={setSelected} onToggle={toggle} onAdd={startManual} onCapture={type=>{startManual();if(type==='image')pickImage();else pasteText()}} onCalendar={()=>setTab('calendar')} onSettings={()=>setTab('settings')} onRefresh={()=>void importDetected().catch(()=>setImportIssue('自動整理暫時失敗，通知已保留。'))} listenerEnabled={Platform.OS!=='android'||listenerEnabled} listenerConnected={Platform.OS!=='android'||listenerConnected} pendingCount={pendingCount} captureMessage={captureMessage} importing={importing} issue={importIssue}/>}
+        {tab==='home'&&<HomeDashboard notices={data.notices} onOpen={setSelected} onAdd={startManual} onQuickAdd={startFromText} onCapture={type=>{startManual();if(type==='image')pickImage();else pasteText()}} onCalendar={()=>setTab('calendar')} onSettings={()=>setTab('settings')} onRefresh={()=>void importDetected().catch(()=>setImportIssue('自動整理暫時失敗，通知已保留。'))} listenerEnabled={Platform.OS!=='android'||listenerEnabled} listenerConnected={Platform.OS!=='android'||listenerConnected} pendingCount={pendingCount} captureMessage={captureMessage} importing={importing} issue={importIssue}/>}
 
         {tab==='calendar'&&<MonthCalendar notices={data.notices} onOpen={setSelected} onAdd={addForDate}/>}
 
@@ -284,20 +292,20 @@ function Main(){
       </ScrollView>
     </KeyboardAvoidingView>
 
-    {tab==='manual'&&<View style={{paddingHorizontal:20,paddingVertical:6,backgroundColor:p.paper,borderTopWidth:1,borderTopColor:p.border}}><Button label={draft.editing?'儲存變更':draft.date||draft.time?'加入行程':'加入待辦'} disabled={busy} onPress={save}/></View>}
+    {tab==='manual'&&<View style={{paddingHorizontal:20,paddingVertical:6,backgroundColor:p.paper,borderTopWidth:1,borderTopColor:p.border}}><Button label={draft.editing?'儲存變更':'加入行程'} disabled={busy} onPress={save}/></View>}
     {tab!=='manual'&&<SafeAreaView edges={['bottom']} style={s.bottom}><View style={s.tabs}>{([['home','今天','today-outline'],['calendar','月曆','calendar-outline'],['settings','設定','settings-outline']] as const).map(([key,label,icon])=><Pressable key={key} accessibilityRole="tab" accessibilityState={{selected:tab===key}} onPress={()=>setTab(key)} style={[s.tab,tab===key&&{backgroundColor:p.mint,borderRadius:22,marginHorizontal:8}]}><Icon name={icon} color={tab===key?p.green:p.muted} size={23}/><Text style={[s.tabText,tab===key&&{color:p.green,fontWeight:'700'}]}>{label}</Text></Pressable>)}</View></SafeAreaView>}
 
     <Modal visible={!!notice} onRequestClose={()=>setSelected(null)} animationType="slide"><SafeAreaView style={s.root}><View style={s.modalBar}><Pressable onPress={()=>setSelected(null)} style={s.row}><Icon name="chevron-back"/><Text style={s.brand}>返回</Text></Pressable></View>{notice&&<ScrollView contentContainerStyle={s.content}>
       {notice.done&&<Text style={s.info}>已完成</Text>}{notice.needsReview&&<Text style={s.warning}>這則內容需要確認</Text>}
       <DetailHeading notice={notice} when={whenLabel(notice)}/>{displayLocation(notice.location)&&<Text style={s.body}>📍 {displayLocation(notice.location)}</Text>}{noticeMapUrl&&<Pressable accessibilityRole="link" onPress={()=>void Linking.openURL(noticeMapUrl).catch(()=>notify('無法開啟 Google Maps。'))} style={[s.chip,{alignSelf:'flex-start',flexDirection:'row',alignItems:'center',gap:7,marginTop:8}]}><Icon name="navigate-outline" size={17}/><Text style={[s.chipText,{color:p.green,fontWeight:'700'}]}>在 Google Maps 開啟</Text></Pressable>}{noticeWebLinks.length>0&&<View style={s.chips}>{noticeWebLinks.map(url=><Pressable key={url} accessibilityRole="link" onPress={()=>void Linking.openURL(url).catch(()=>notify('無法開啟連結。'))} style={[s.chip,{flexDirection:'row',alignItems:'center',gap:7}]}><Icon name="link-outline" size={16}/><Text style={s.chipText}>開啟 {linkHost(url)}</Text></Pressable>)}</View>}
       {!!notice.replySuggestions?.length&&canReplyToNotification(notice.source)&&<><Text style={s.sectionTitle}>快速回覆</Text><View style={s.chips}>{notice.replySuggestions.map(reply=><Pressable key={reply} accessibilityRole="button" onPress={()=>void run(async()=>{if(!await confirm(`傳送回覆「${reply}」？`))return;await replyToNotification(notice.source,reply);notify('已回覆。')})} style={s.chip}><Text style={s.chipText}>{reply}</Text></Pressable>)}</View></>}
-      {notice.checklist.length>0&&<>{notice.checklist.map(c=><Pressable key={c.id} accessibilityRole="checkbox" accessibilityState={{checked:c.done}} style={s.checkRow} onPress={()=>void run(async()=>commit({...live.current,notices:live.current.notices.map(n=>n.id===notice.id?updateNotice(n,{checklist:n.checklist.map(x=>x.id===c.id?{...x,done:!x.done}:x)}):n)}))}><Icon name={c.done?'checkbox':'square-outline'}/><Text style={[s.body,s.flex,c.done&&{textDecorationLine:'line-through',color:p.muted}]}>{c.text}</Text></Pressable>)}</>}
-      <Button label={notice.done?"恢復為未完成":"標記已完成"} secondary={notice.done} onPress={()=>notice.done?toggle(notice):completeAndClose(notice)}/><View style={s.row}><View style={s.flex}><Button label="編輯" secondary onPress={()=>edit(notice)}/></View>{notice.dueAt&&<View style={s.flex}><Button label="加入行事曆" secondary onPress={()=>void run(async()=>{if(Platform.OS==='android'){await api.requestCalendarPermission();const result=await api.addToSystemCalendar(notice,`manual-${notice.id}`);notify(result==='already-synced'?'舊版加入的行程已有副本，請到手機行事曆編輯。':result==='updated'?'已更新手機行事曆。':'已加入行事曆。')}else await api.exportCalendar(notice)})}/></View>}</View>
+      {notice.checklist.length>0&&<><Text style={s.sectionTitle}>行前準備</Text>{notice.checklist.map(c=><Pressable key={c.id} accessibilityRole="checkbox" accessibilityState={{checked:c.done}} style={s.checkRow} onPress={()=>void run(async()=>commit({...live.current,notices:live.current.notices.map(n=>n.id===notice.id?updateNotice(n,{checklist:n.checklist.map(x=>x.id===c.id?{...x,done:!x.done}:x)}):n)}))}><Icon name={c.done?'checkbox':'square-outline'}/><Text style={[s.body,s.flex,c.done&&{textDecorationLine:'line-through',color:p.muted}]}>{c.text}</Text></Pressable>)}</>}
+      <View style={s.row}><View style={s.flex}><Button label="編輯行程" secondary onPress={()=>edit(notice)}/></View>{notice.dueAt&&<View style={s.flex}><Button label="加入行事曆" secondary onPress={()=>void run(async()=>{if(Platform.OS==='android'){await api.requestCalendarPermission();const result=await api.addToSystemCalendar(notice,`manual-${notice.id}`);notify(result==='already-synced'?'舊版加入的行程已有副本，請到手機行事曆編輯。':result==='updated'?'已更新手機行事曆。':'已加入行事曆。')}else await api.exportCalendar(notice)})}/></View>}</View>
       <Pressable onPress={()=>setDetailMore(v=>!v)} style={[s.card,{marginTop:12,paddingVertical:13}]}><View style={s.row}><Text style={[s.cardTitle,s.flex,{marginBottom:0}]}>更多</Text><Icon name={detailMore?'chevron-up':'chevron-down'} color={p.muted}/></View></Pressable>
-      {detailMore&&<><Button label="分享" secondary onPress={()=>void run(()=>api.shareNotice(notice))}/>{notice.source?<><Text style={s.sectionTitle}>原始內容</Text><Text selectable style={s.sourceText}>{stripDetectedId(notice.source)}</Text></>:null}{notice.sourceImage&&<Image source={{uri:notice.sourceImage}} style={s.sourceFull} resizeMode="contain"/>}{notice.history.length>0&&<><Text style={s.sectionTitle}>修改紀錄</Text>{notice.history.map((h,i)=><View key={i} style={s.card}><Text style={s.caption}>{new Date(h.at).toLocaleString('zh-TW')}</Text><Text style={s.body}>{h.title}</Text><Text style={s.caption}>{h.dueAt?new Date(h.dueAt).toLocaleString('zh-TW'):'無期限待辦'}</Text></View>)}</>}<Button label="刪除" danger onPress={()=>remove(notice)}/></>}
+      {detailMore&&<><Button label="分享行程" secondary onPress={()=>void run(()=>api.shareNotice(notice))}/><Button label={notice.done?'恢復顯示':'移至過往紀錄'} secondary onPress={()=>notice.done?toggle(notice):completeAndClose(notice)}/>{notice.source?<><Text style={s.sectionTitle}>原始內容</Text><Text selectable style={s.sourceText}>{stripDetectedId(notice.source)}</Text></>:null}{notice.sourceImage&&<Image source={{uri:notice.sourceImage}} style={s.sourceFull} resizeMode="contain"/>}{notice.history.length>0&&<><Text style={s.sectionTitle}>修改紀錄</Text>{notice.history.map((h,i)=><View key={i} style={s.card}><Text style={s.caption}>{new Date(h.at).toLocaleString('zh-TW')}</Text><Text style={s.body}>{h.title}</Text><Text style={s.caption}>{h.dueAt?new Date(h.dueAt).toLocaleString('zh-TW'):'時間未設定'}</Text></View>)}</>}<Button label="刪除" danger onPress={()=>remove(notice)}/></>}
     </ScrollView>}</SafeAreaView></Modal>
 
-    <Modal visible={!data.welcomed&&!policy} animationType="fade" onRequestClose={()=>{}}><SafeAreaView style={s.root}><View style={[s.content,{flex:1,justifyContent:'center'}]}><View style={s.welcomeIcon}><Icon name="calendar-outline" size={44} color="white"/></View><Text style={s.heading}>整理重要通知</Text><Text style={[s.body,{marginBottom:22}]}>{Platform.OS==='android'?'先選擇要監聽的 App。只有你勾選的 App 才會被讀取；有時間的內容變行程，沒有期限的任務變待辦。':'iPhone 版可用截圖或貼上文字建立行程與待辦。'}</Text>{Platform.OS==='android'?<Button label="選擇監聽 App" onPress={()=>void run(async()=>{await commit({...live.current,welcomed:true});await api.notificationAccess(true);api.openNotificationListenerSettings()})}/>:<Button label="開始使用" onPress={()=>void run(()=>commit({...live.current,welcomed:true}))}/>}<Button label="稍後" secondary onPress={()=>void run(()=>commit({...live.current,welcomed:true}))}/><Pressable onPress={()=>setPolicy(true)}><Text style={[s.caption,{textAlign:'center',padding:12}]}>隱私權說明</Text></Pressable></View></SafeAreaView></Modal>
+    <Modal visible={!data.welcomed&&!policy} animationType="fade" onRequestClose={()=>{}}><SafeAreaView style={s.root}><View style={[s.content,{flex:1,justifyContent:'center'}]}><View style={s.welcomeIcon}><Icon name="calendar-outline" size={44} color="white"/></View><Text style={s.heading}>自動找出重要行程</Text><Text style={[s.body,{marginBottom:22}]}>{Platform.OS==='android'?'先選擇要監聽的 App。生活通知管家只收錄有明確日期的個人行程；廣告、一般聊天與待辦會直接略過。':'iPhone 版可從截圖或文字找出有明確日期的行程。'}</Text>{Platform.OS==='android'?<Button label="選擇監聽 App" onPress={()=>void run(async()=>{await commit({...live.current,welcomed:true});await api.notificationAccess(true);api.openNotificationListenerSettings()})}/>:<Button label="開始使用" onPress={()=>void run(()=>commit({...live.current,welcomed:true}))}/>}<Button label="稍後" secondary onPress={()=>void run(()=>commit({...live.current,welcomed:true}))}/><Pressable onPress={()=>setPolicy(true)}><Text style={[s.caption,{textAlign:'center',padding:12}]}>隱私權說明</Text></Pressable></View></SafeAreaView></Modal>
 
     <Modal visible={policy} onRequestClose={()=>setPolicy(false)} animationType="slide"><SafeAreaView style={s.root}><View style={s.modalBar}><Text style={s.brand}>隱私權說明</Text><Pressable onPress={()=>setPolicy(false)}><Icon name="close"/></Pressable></View><ScrollView contentContainerStyle={s.content}><Text selectable style={s.body}>{privacy(Constants.expoConfig?.extra?.supportEmail)}</Text></ScrollView></SafeAreaView></Modal>
     {busy&&<View style={s.busy} pointerEvents="auto"><ActivityIndicator color="white"/></View>}

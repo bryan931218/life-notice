@@ -32,7 +32,7 @@ describe('AI 多工具規劃',()=>{
   it('同時兩個主要動作會拒絕執行',()=>{
     assert.throws(()=>parseAiToolCalls([
       {name:'create_calendar_event',arguments:JSON.stringify(eventArgs)},
-      {name:'create_task',arguments:JSON.stringify({title:'回覆老師',due_at:null,reminder_minutes:null,category:'學校',checklist:[],importance:'normal',confidence:0.9,reason:'待辦'})},
+      {name:'ignore_notification',arguments:JSON.stringify({confidence:0.9,reason:'不是行程'})},
     ]),/唯一的主要/);
   });
 
@@ -42,8 +42,4 @@ describe('AI 多工具規劃',()=>{
     assert.throws(()=>parseAiToolCall({name:'cancel_existing_event',arguments:JSON.stringify({event_id:'fake',importance:'urgent',confidence:0.99,reason:'取消'})},new Set(['real'])),/不存在/);
   });
 
-  it('可以將既有 Todo 標記完成',()=>{
-    const d=parseAiToolCall({name:'complete_existing_task',arguments:JSON.stringify({event_id:'todo-1',confidence:0.97,reason:'通知顯示已提交'})},new Set(['todo-1']));
-    assert.equal(d.type,'complete_existing_task');
-  });
 });

@@ -17,6 +17,8 @@ class CaptureDateTest {
   @Test fun listenerAcceptsSplitSportsPlan(){val text="晚上要不要打羽球\n6～8";assertTrue(LifeNoticeListenerService.isCandidateText(text));assertTrue(LifeNoticeListenerService.scoreText(text).first>=7)}
   @Test fun aiModeUsesRecallFirstFilter(){assertTrue(LifeNoticeListenerService.isCandidateText("晚點再跟你確認細節",true))}
   @Test fun definiteAdsAreDropped(){assertTrue(LifeNoticeListenerService.isDefiniteJunkText("會員專屬限時優惠，全館五折，立即下單再享免運"))}
+  @Test fun purchaseTaskWithAgeMarkersIsDropped(){val text="[999 秒前] B班購買畢業方案的同學\n[999 秒前] 請根據你購買的方案金額\n[999 秒前] 記得備註你的名字";assertTrue(LifeNoticeListenerService.isDefiniteJunkText(text));assertFalse(LifeNoticeListenerService.isCandidateText(text))}
+  @Test fun datedNonCalendarTasksAreDropped(){assertTrue(LifeNoticeListenerService.isDefiniteJunkText("9月20日前請繳費並備註姓名"));assertTrue(LifeNoticeListenerService.isDefiniteJunkText("明天20:00前記得購買回程車票"))}
   @Test fun personalPlansSurviveAdFilter(){assertFalse(LifeNoticeListenerService.isDefiniteJunkText("明天下午3點開會討論廣告企劃"));assertFalse(LifeNoticeListenerService.isDefiniteJunkText("今天吃好吃的\n在星月廣場\n我們訂20：15"))}
   @Test fun strictBackgroundCaptureAcceptsCompletePlan(){val text="今天吃好吃的\n在星月廣場\n我們訂20：15";val score=LifeNoticeListenerService.scoreText(text).first;assertTrue(LifeNoticeListenerService.canAutoCaptureText(text,score,"jp.naver.line.android"))}
   @Test fun strictBackgroundCaptureRejectsMarketingAndAmbiguity(){val ad="今日限定好康，會員專屬加碼回饋，領券後前往賣場";assertFalse(LifeNoticeListenerService.canAutoCaptureText(ad,20,"com.shop"));val vague="明天晚上再說";assertFalse(LifeNoticeListenerService.canAutoCaptureText(vague,LifeNoticeListenerService.scoreText(vague).first,"jp.naver.line.android"))}

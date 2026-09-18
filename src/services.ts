@@ -130,7 +130,10 @@ export async function load():Promise<State>{
   const raw=await AsyncStorage.getItem(KEY);if(!raw)return {...EMPTY,members:[...EMPTY.members],notices:[]};
   const saved=JSON.parse(raw);const validated=validateBackup(saved);
   const restored=validated.notices.map((n,i)=>({...n,sourceImage:typeof saved.notices[i]?.sourceImage==='string' && FS.documentDirectory && saved.notices[i].sourceImage.startsWith(FS.documentDirectory)?saved.notices[i].sourceImage:undefined}));
-  const notices=dedupeAutoNotices(restored);
+  // v1.7 is calendar-only. Remove legacy auto-captured tasks and items that the
+  // stronger event filter now identifies as ads or non-calendar actions.
+  const eventOnly=restored.filter(n=>!AUTO_SOURCE.test(n.source)||(!!n.dueAt&&!isDefiniteJunkNotification({packageName:'',appName:'',title:n.title,text:n.source})));
+  const notices=dedupeAutoNotices(eventOnly);
   const result={...validated,welcomed:!!saved.welcomed,notices};
   if(notices.length!==restored.length||notices.some((n,i)=>n.title!==restored[i]?.title))await AsyncStorage.setItem(KEY,JSON.stringify(result));
   return result;
@@ -147,9 +150,9 @@ export async function keepImage(uri:string):Promise<string>{if(Platform.OS==='we
 export async function removeImage(uri?:string){if(uri && FS.documentDirectory && uri.startsWith(FS.documentDirectory+'sources/'))await FS.deleteAsync(uri,{idempotent:true});}
 if(Platform.OS!=='web')Notifications.setNotificationHandler({handleNotification:async()=>({shouldShowBanner:true,shouldShowList:true,shouldPlaySound:true,shouldSetBadge:false})});
 export async function notificationAccess(request=false){if(Platform.OS==='web')return false;if(Platform.OS==='android')await Notifications.setNotificationChannelAsync('life-notices',{name:'行程提醒',importance:Notifications.AndroidImportance.HIGH});let p=await Notifications.getPermissionsAsync();if(!p.granted && request)p=await Notifications.requestPermissionsAsync();return p.granted || p.ios?.status===Notifications.IosAuthorizationStatus.PROVISIONAL;}
-export async function notifyDetectionResult(n:Notice,kind:'created'|'updated'|'cancelled'|'completed'='created'){
+export async function notifyDetectionResult(n:Notice,kind:'created'|'updated'|'cancelled'='created'){
  if(!(await notificationAccess(true)))return false;
- const title=kind==='created'?'已建立新行程':kind==='updated'?'行程已更新':kind==='cancelled'?'行程已取消':'待辦已完成';
+ const title=kind==='created'?'已建立新行程':kind==='updated'?'行程已更新':'行程已取消';
  const when=n.dueAt?new Date(n.dueAt).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:n.allDay?undefined:'2-digit',minute:n.allDay?undefined:'2-digit'}):'時間待確認';
  await Notifications.scheduleNotificationAsync({identifier:`detected-result-${kind}-${n.id}-${n.updatedAt}`,content:{title,body:`${n.title} · ${when}`,sound:'default',data:{noticeId:n.id}},trigger:{type:Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,seconds:1,channelId:'life-notices'}});
  return true;

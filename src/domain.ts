@@ -13,6 +13,13 @@ export type State = { version: 1; notices: Notice[]; members: string[]; welcomed
 export const EMPTY: State = { version: 1, notices: [], members: ['我'], welcomed: false };
 export const CATEGORIES: Category[] = ['生活', '學校', '帳單', '取件', '活動'];
 export const id = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+export function inferLocationText(source:string):string{
+  const text=source.replace(/\r/g,'\n');
+  const labeled=text.match(/(?:地點|地址|會場|店名)\s*[:：]\s*([^\n，。；;!?！？]{2,60})/i)?.[1];
+  if(labeled)return labeled.trim().slice(0,200);
+  const conversational=text.match(/(?:在|到|去)\s*([^\n，。；;!?！？]{2,50}?)(?=\s*(?:吃飯|用餐|聚餐|見面|碰面|集合|開會|上課|看電影|打球|運動|報到|$))/)?.[1];
+  return conversational?.trim().slice(0,200)??'';
+}
 export function parseDate(date: string, time: string): string | null {
   if (!date.trim() && !time.trim()) return null;
   if (!date.trim() && time.trim()) throw new Error('填寫時間時也需要日期。');
@@ -208,7 +215,7 @@ export function inferNotice(source: string, now = new Date()): Inference {
     if(!checklist.some(x=>x===cleaned))checklist.push(cleaned);
     if(checklist.length>=12)break;
   }
-  if(checklist.length)evidence.push(`抓到 ${checklist.length} 個待辦／準備動作`);
+  if(checklist.length)evidence.push(`抓到 ${checklist.length} 個行前準備動作`);
 
   const actionable=Boolean(date || checklist.length || DATE_CONTEXT.test(text));
   let confidence:'高'|'中'|'低'='低';

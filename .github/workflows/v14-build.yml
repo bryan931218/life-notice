@@ -80,17 +80,17 @@ jobs:
       - name: Prepare packages
         shell: bash
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.6.0.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.6.0.aab
-          sha256sum life-notice-v1.6.0.apk life-notice-v1.6.0.aab > SHA256SUMS.txt
+          cp android/app/build/outputs/apk/release/app-release.apk life-notice-v1.7.0.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab life-notice-v1.7.0.aab
+          sha256sum life-notice-v1.7.0.apk life-notice-v1.7.0.aab > SHA256SUMS.txt
 
       - name: Upload Android packages
         uses: actions/upload-artifact@v4
         with:
-          name: life-notice-v1.6.0-android
+          name: life-notice-v1.7.0-android
           path: |
-            life-notice-v1.6.0.apk
-            life-notice-v1.6.0.aab
+            life-notice-v1.7.0.apk
+            life-notice-v1.7.0.aab
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -101,8 +101,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="v160-preview-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" life-notice-v1.6.0.apk SHA256SUMS.txt \
+          TAG="v170-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" life-notice-v1.7.0.apk SHA256SUMS.txt \
             --target "$GITHUB_SHA" --prerelease \
-            --title "生活通知管家 v1.6.0 Android 測試版 #${GITHUB_RUN_NUMBER}" \
-            --notes "v1.6.0 可靠性更新：AI 或網路失敗不再中斷整批通知；明確行程可在 App 關閉時安全寫入行事曆；新增待整理數量、監聽服務真實連線狀態與重新連線；強化分段對話合併、重要通知保留及廣告過濾。測試簽章，非商店正式版。"
+            --title "生活通知管家 v1.7.0 Android 測試版 #${GITHUB_RUN_NUMBER}" \
+            --notes "v1.7.0 行程專注更新：只收錄能確認日期的個人行程，廣告、購買、付款、填表、取件與一般待辦會略過；修正「999 秒前」被誤判成時間；新增一句話建立、七天摘要與更清楚的待確認入口，並重整首頁視覺。測試簽章，非商店正式版。"

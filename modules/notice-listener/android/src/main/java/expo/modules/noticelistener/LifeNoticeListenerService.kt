@@ -26,11 +26,9 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val RELATIVE_NUMBER_TIME = Regex("(?:今天|今晚|明天|明晚|後天|大後天|週[一二三四五六日天]|星期[一二三四五六日天]|禮拜[一二三四五六日天])[^\\n]{0,5}(?:[01]?\\d|2[0-3])(?=\\s|[.。,:：點時]|$)")
     private val CHINESE_TIME = Regex("(?:(?:上午|早上|中午|下午|晚上|晚間|凌晨)\\s*)?(?:二十[零〇一二三]?|十[零〇一二三四五六七八九]?|[零〇一二兩三四五六七八九])點(?:半|[零〇一二兩三四五六七八九十]{1,3}分?)?")
     private val MAP_LINK = Regex("https?://(?:maps\\.app\\.goo\\.gl|goo\\.gl/maps|www\\.google\\.[^/]+/maps|maps\\.google\\.)/[^\\s]+", RegexOption.IGNORE_CASE)
-    private val HIGH_INTENT = Regex("截止|最晚|到期|繳交|繳費|繳款|付款|取件|領取|取貨|集合|報名|預約|會議|開會|面試|上課|考試|比賽|登機|出發|看診|門診|回診|訂位|入住|退房")
-    private val TASK_INTENT = Regex("填寫|回覆|提交|完成|準備|攜帶|帶上|聯絡|寄送|繳交|繳費|付款|領取|取件|報名|預約|購買|買|訂購|確認")
+    private val HIGH_INTENT = Regex("集合|報名|預約|會議|開會|面試|上課|考試|比賽|登機|出發|看診|門診|回診|訂位|入住|退房")
     private val EVENT = Regex("活動|課程|講座|聚餐|會議|比賽|考試|面試|預約|看診|回診|集合|出發|登機|訂位")
     private val SOCIAL_PLAN = Regex("吃飯|吃早餐|吃東西|吃好吃的|早餐|午餐|晚餐|宵夜|聚餐|見面|碰面|喝咖啡|咖啡|看電影|電影|打球|羽球|籃球|棒球|運動|練球|唱歌|逛街|約一下|約嗎|要不要|一起|吃這家|去這家")
-    private val ACTION = Regex("請|需要|需|須|務必|記得|別忘|回覆|填寫|完成|提交|繳|帶|攜帶|準備|確認|參加|出席|領取|取件|付款|報名|預約")
     private val CHANGE = Regex("取消|改期|延期|提前|延後|異動|更改|變更|臨時|最後通知")
     private val IMPORTANT = Regex("重要|緊急|急件|務必|請盡快|請立即|異動|更改|取消|延後|提前")
     private val HARD_IGNORE = Regex("驗證碼|認證碼|OTP|一次性密碼|登入碼|verification code|節能模式|省電模式|電池電量|剩餘電量|充電完成|裝置維護|系統更新|下載完成|安裝完成|同步完成|備份完成|VPN|截圖已儲存", RegexOption.IGNORE_CASE)
@@ -38,7 +36,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
     private val EXPLICIT_AD = Regex("\\b(?:sponsored|advertisement)\\b|贊助內容|付費廣告|此為廣告", RegexOption.IGNORE_CASE)
     private val SOCIAL_NOISE = Regex("按讚了你的|對你的.*表示|開始追蹤你|追蹤了你|查看了你的|新增了限時動態|發佈了新貼文|推薦你追蹤|你可能認識|有人發佈了|正在直播|liked your|reacted to your|started following|new post from|is live", RegexOption.IGNORE_CASE)
     private val NEWS_NOISE = Regex("熱門新聞|推薦文章|每日精選|焦點新聞|即時新聞|今日頭條|為你推薦|今日推薦|編輯精選|你可能有興趣")
-    private val PERSONAL = Regex("您的?(?:訂單|預約|訂位|掛號|航班|車次|包裹|帳單)|已(?:預約|訂位|報名|付款|繳費|出貨|到店|取件)|面試通知|錄取通知|會議邀請|行事曆邀請|付款期限|繳費期限")
+    private val PERSONAL = Regex("您的?(?:預約|訂位|掛號|航班|車次)|已(?:預約|訂位|報名)|面試通知|錄取通知|會議邀請|行事曆邀請")
     private val SCHEDULE = Regex("(?:今天|今晚|明天|明晚|後天|週[一二三四五六日天]|星期[一二三四五六日天])[^\\n]{0,40}(?:\\d{1,2}\\s*[:：.．點時]|早上|上午|中午|下午|晚上|晚間)[^\\n]{0,50}(?:吃|去|見面|碰面|開會|會議|上課|考試|面試|看診|預約|訂位|打球|運動|集合|出發|要不要|一起)")
     private val PROMO = listOf(
       Regex("限時(?:優惠|特價|搶購)?"), Regex("優惠券|折價券|優惠碼|折扣碼"),
@@ -47,6 +45,8 @@ class LifeNoticeListenerService : NotificationListenerService() {
       Regex("購物優惠|新品上市|熱賣|開賣|最後倒數|限量|限定|好康|回饋|加碼|開搶|領券"),
       Regex("(?:NTD?|新台幣|＄)\\s*\\d+|省下|最低價|優惠價|特惠價", RegexOption.IGNORE_CASE)
     )
+    private val NON_EVENT_TASK = Regex("購買|訂購|下單|方案金額|付款|繳費|繳款|帳單|填寫|提交|繳交|回覆|備註.{0,12}(?:姓名|名字)|領取|取件|取貨|包裹|截止|到期")
+    private val AGE_MARKER = Regex("(?:^|[\\[（(\\s])\\d+\\s*(?:秒|分鐘|小時)前(?:[\\]）)\\s]|$)")
     private const val GMAIL_PACKAGE = "com.google.android.gm"
     private val GMAIL_SUMMARY = Regex("\\b\\d+\\s*封新郵件\\b|\\b\\d+\\s+new\\s+emails?\\b|new mail summary", RegexOption.IGNORE_CASE)
     private val GMAIL_BROADCAST = Regex("全校公告(?:信)?|校務公告|服務公告|系統公告|資訊技術服務中心|軍訓室[^\\n]{0,20}(?:公告|通知|注意事項)|電子報|newsletter|Adobe\\s+Creative\\s+Cloud|授權[^\\n]{0,20}到期", RegexOption.IGNORE_CASE)
@@ -79,28 +79,22 @@ class LifeNoticeListenerService : NotificationListenerService() {
       val hasDaypart = DAYPART.containsMatchIn(text)
       val hasMapLink = MAP_LINK.containsMatchIn(text)
       val hasHighIntent = HIGH_INTENT.containsMatchIn(text)
-      val hasTaskIntent = TASK_INTENT.containsMatchIn(text)
       val hasEvent = EVENT.containsMatchIn(text)
       val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
-      val hasAction = ACTION.containsMatchIn(text)
       val hasChange = CHANGE.containsMatchIn(text)
       val conversationalPlan = hasDate && hasSocialPlan && (hasTime || hasDaypart || hasMapLink)
-      val aiContextCandidate = aiEnabled && hasDate && (hasTime || hasDaypart || hasMapLink) &&
-        (hasSocialPlan || hasMapLink || hasHighIntent || hasEvent)
-      return hasChange ||
-        hasTaskIntent ||
-        conversationalPlan ||
-        (hasDate && hasTime) ||
+      return conversationalPlan ||
         (hasTime && hasDaypart && hasSocialPlan) ||
-        aiContextCandidate ||
-        (hasHighIntent && (hasDate || hasTime || hasDaypart || hasAction)) ||
-        (hasDate && hasAction) ||
-        (hasDate && (hasTime || hasDaypart) && hasEvent)
+        (hasDate && (hasTime || hasDaypart) && (hasHighIntent || hasEvent || hasSocialPlan)) ||
+        (hasChange && hasDate && (hasTime || hasDaypart))
     }
 
     internal fun isDefiniteJunkText(text: String): Boolean {
-      if (PERSONAL.containsMatchIn(text) || SCHEDULE.containsMatchIn(text)) return false
+      if (SCHEDULE.containsMatchIn(text)) return false
       if (EXPLICIT_AD.containsMatchIn(text) || SOCIAL_NOISE.containsMatchIn(text) || NEWS_NOISE.containsMatchIn(text)) return true
+      if (NON_EVENT_TASK.containsMatchIn(text) && !EVENT.containsMatchIn(text) && !SOCIAL_PLAN.containsMatchIn(text)) return true
+      if (AGE_MARKER.containsMatchIn(text) && !DATE.containsMatchIn(text) && !RELATIVE.containsMatchIn(text)) return true
+      if (PERSONAL.containsMatchIn(text)) return false
       val hits = PROMO.count { it.containsMatchIn(text) }
       return hits >= 2
     }
@@ -111,7 +105,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
       if (!PERSONAL.containsMatchIn(text) && PROMO.count { it.containsMatchIn(text) } >= 2) return false
       val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
       val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
-      val hasIntent = HIGH_INTENT.containsMatchIn(text) || EVENT.containsMatchIn(text) || SOCIAL_PLAN.containsMatchIn(text) || TASK_INTENT.containsMatchIn(text)
+      val hasIntent = HIGH_INTENT.containsMatchIn(text) || EVENT.containsMatchIn(text) || SOCIAL_PLAN.containsMatchIn(text)
       return score >= 10 && hasDate && hasTime && hasIntent
     }
 
@@ -128,8 +122,6 @@ class LifeNoticeListenerService : NotificationListenerService() {
       if (HIGH_INTENT.containsMatchIn(text)) { score += 5; reasons += "行程/期限" }
       else if (EVENT.containsMatchIn(text)) { score += 3; reasons += "活動語意" }
       if (SOCIAL_PLAN.containsMatchIn(text)) { score += 3; reasons += "約定語意" }
-      if (TASK_INTENT.containsMatchIn(text)) { score += 6; reasons += "待辦" }
-      else if (ACTION.containsMatchIn(text)) { score += 2; reasons += "待辦語意" }
       if (IMPORTANT.containsMatchIn(text)) { score += 4; reasons += "重要訊息" }
       return score to reasons.distinct().joinToString("、")
     }

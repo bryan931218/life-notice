@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {resolveDateText} from '../src/date-resolver.ts';
-import {parseDate,toCalendar,reminderPlan,validateBackup,inferLiveNotification,EMPTY,type Notice} from '../src/domain.ts';
+import {parseDate,toCalendar,reminderPlan,validateBackup,inferLiveNotification,inferLocationText,EMPTY,type Notice} from '../src/domain.ts';
 import {noticesForDay} from '../src/calendar.ts';
 const base=new Date(2026,8,12,10,0); // Saturday, local device time
 for(const [text,date,time] of [
@@ -19,6 +19,8 @@ for(const text of ['明天或後天開會','2026/02/30 14:00','2026/13/01 14:00'
 test('跨年相對日期',()=>assert.equal(resolveDateText('明天九點',new Date(2026,11,31)).date,'2027-01-01'));
 test('截圖主題優先於攜帶事項',()=>{const r=inferLiveNotification('牙醫回診\n明天下午三點半\n請帶健保卡',base);assert.equal(r.title,'牙醫回診');assert.deepEqual(r.checklist,['請帶健保卡']);assert.equal(r.time,'15:30')});
 test('時段預設必須待確認',()=>{const r=resolveDateText('明天下午開會',base);assert.equal(r.time,'15:00');assert.equal(r.needsReview,true)});
+test('通知顯示的幾秒前不會被當成行程日期',()=>{const r=inferLiveNotification('[999 秒前] B班購買畢業方案的同學\n[999 秒前] 請根據你購買的方案金額\n[999 秒前] 記得備註你的名字',base);assert.equal(r.date,'');assert.equal(r.time,'');});
+test('一句話行程會抽出地點',()=>{assert.equal(inferLocationText('明天晚上7:30在星月廣場聚餐'),'星月廣場');assert.equal(inferLocationText('地點：台北車站 東三門\n明早集合'),'台北車站 東三門');});
 const notice:Notice={id:'qa',title:'旅行',source:'測試',category:'生活',dueAt:parseDate('2026-09-12',''),endAt:parseDate('2026-09-15',''),allDay:true,assignee:'我',checklist:[],done:false,remindMinutes:60,createdAt:base.toISOString(),updatedAt:base.toISOString(),history:[]};
 test('全天 ICS 保留多日且結束日不包含',()=>{const ics=toCalendar(notice);assert.match(ics,/DTSTART;VALUE=DATE:20260912/);assert.match(ics,/DTEND;VALUE=DATE:20260915/);assert.equal(noticesForDay([notice],'2026-09-14').length,1);assert.equal(noticesForDay([notice],'2026-09-15').length,0)});
 test('待確認事件不發排程提醒',()=>assert.equal(reminderPlan([{...notice,needsReview:true}],base.getTime()-86400000).length,0));
