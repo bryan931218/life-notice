@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {parseDate,inferNotice,updateNotice,reminderPlan,validateBackup,toCalendar,EMPTY,type Notice} from '../src/domain.ts';
 const n:Notice={id:'a',title:'家長日',source:'原通知',category:'學校',dueAt:'2027-10-01T02:00:00.000Z',assignee:'我',checklist:[],done:false,remindMinutes:60,createdAt:'2026-09-10T00:00:00Z',updatedAt:'2026-09-10T00:00:00Z',history:[]};
 describe('日期與匯入',()=>{
- it('拒絕不存在的日期和時間',()=>{assert.throws(()=>parseDate('2027-02-29','09:00'));assert.throws(()=>parseDate('2026-09-10','24:00'));assert.throws(()=>parseDate('2026-09-10',''));assert.equal(parseDate('',''),null)});
+ it('拒絕不存在的日期和時間',()=>{assert.throws(()=>parseDate('2027-02-29','09:00'));assert.throws(()=>parseDate('2026-09-10','24:00'));assert.ok(parseDate('2026-09-10',''));assert.throws(()=>parseDate('','09:00'));assert.equal(parseDate('',''),null)});
  it('接受閏年',()=>assert.ok(parseDate('2028-02-29','09:00')));
  it('絕不猜測舊訊息的年份或明天',()=>{assert.equal(inferNotice('9/12 校外教學 明天出發').date,'');assert.equal(inferNotice('明天下午去拿包裹').date,'')});
  it('多日期必須由人確認',()=>{assert.equal(inferNotice('2027/09/12 報名 2027/09/14 出發').date,'')});

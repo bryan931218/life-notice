@@ -18,16 +18,8 @@ describe('AI 工具呼叫安全檢查',()=>{
     }
   });
 
-  it('沒有期限的任務會建立成 Todo 而不是要求補時間',()=>{
-    const d=parseAiToolCall({name:'create_task',arguments:JSON.stringify({
-      title:'填寫畢業表單',due_at:null,reminder_minutes:60,category:'學校',checklist:[],importance:'normal',confidence:0.95,reason:'有明確待辦，但沒有期限'
-    })});
-    assert.equal(d.type,'create_task');
-    if(d.type==='create_task'){
-      assert.equal(d.dueAt,null);
-      assert.equal(d.reminderMinutes,null);
-      assert.equal(d.title,'填寫畢業表單');
-    }
+  it('不再接受建立待辦的工具',()=>{
+    assert.throws(()=>parseAiToolCall({name:'create_task',arguments:JSON.stringify({title:'填寫畢業表單',due_at:null,confidence:0.95,reason:'一般任務'})}),/未知工具/);
   });
 
   it('一般聊天可以明確略過',()=>{
@@ -44,6 +36,6 @@ describe('AI 工具呼叫安全檢查',()=>{
   it('禁止用無效時間建立行事曆事件',()=>{
     assert.throws(()=>parseAiToolCall({name:'create_calendar_event',arguments:JSON.stringify({
       title:'測試',start_at:'明天下午',end_at:null,all_day:false,location:null,reminder_minutes:60,category:'生活',checklist:[],importance:'normal',confidence:0.8,reason:'測試'
-    })}),/有效的行程時間/);
+    })}),/日期或時區格式不正確/);
   });
 });

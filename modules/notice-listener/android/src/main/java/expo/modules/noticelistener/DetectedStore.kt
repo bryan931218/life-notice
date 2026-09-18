@@ -43,11 +43,16 @@ internal object DetectedStore {
   private const val KEY = "detected"
   private const val AI_MODE = "ai_enabled"
   private const val ALERT_LEVEL = "alert_level"
+  private const val AUTO_CALENDAR = "auto_calendar"
+  private const val PROCESSED = "processed_ids_v1"
   private const val MAX = 120
+  private const val MAX_PROCESSED = 500
   private const val CONTEXT_WINDOW = 15L * 60L * 1000L
   private val AGE_PREFIX = Regex("^\\[\\d+ 秒前]\\s*")
 
   private fun prefs(context: Context) = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
+  fun autoCalendar(context: Context) = prefs(context).getBoolean(AUTO_CALENDAR, false)
+  fun setAutoCalendar(context: Context, enabled: Boolean) = prefs(context).edit().putBoolean(AUTO_CALENDAR, enabled).apply()
 
   private fun normalizedContext(text: String): String = text
     .lineSequence()
@@ -72,6 +77,7 @@ internal object DetectedStore {
 
   @Synchronized
   fun add(context: Context, item: DetectedNotice): Boolean {
+    if (item.id in processed(context)) return false
     val current = get(context).toMutableList()
     if (current.any { it.id == item.id }) return false
 
@@ -82,14 +88,20 @@ internal object DetectedStore {
     // creating the same event once per notification update.
     val incomingLines = normalizedLines(item.text)
     current.removeAll { old ->
-      if (old.packageName != item.packageName || old.title.trim() != item.title.trim()) return@removeAll false
+      if (old.packageName != item.packageName || ConversationBufferStore.normalizeTitle(old.title) != ConversationBufferStore.normalizeTitle(item.title)) return@removeAll false
       if (kotlin.math.abs(item.receivedAt - old.receivedAt) > CONTEXT_WINDOW) return@removeAll false
       val oldLines = normalizedLines(old.text)
       oldLines.isNotEmpty() && incomingLines.isNotEmpty() && oldLines.any { it in incomingLines }
     }
 
     current.add(0, item)
-    save(context, current.take(MAX))
+    // When the queue is full, evict the oldest lowest-signal item. A burst of
+    // ordinary chat must not push an earlier deadline or reservation out.
+    while (current.size > MAX) {
+      val removeAt = current.indices.minWithOrNull(compareBy<Int> { current[it].score }.thenBy { current[it].receivedAt }) ?: current.lastIndex
+      current.removeAt(removeAt)
+    }
+    save(context, current)
     return true
   }
 
@@ -119,6 +131,17 @@ internal object DetectedStore {
     if (ids.isEmpty()) return
     save(context, get(context).filterNot { it.id in ids })
   }
+
+  @Synchronized
+  fun markProcessed(context: Context, ids: Set<String>) {
+    if (ids.isEmpty()) return
+    val updated = (ids.toList() + processed(context).toList()).distinct().take(MAX_PROCESSED).toSet()
+    prefs(context).edit().putStringSet(PROCESSED, updated).apply()
+    remove(context, ids)
+  }
+
+  private fun processed(context: Context): Set<String> =
+    prefs(context).getStringSet(PROCESSED, emptySet())?.toSet() ?: emptySet()
 
   fun aiMode(context: Context) = prefs(context).getBoolean(AI_MODE, false)
 
