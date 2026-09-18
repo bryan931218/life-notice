@@ -172,16 +172,6 @@ class LifeNoticeListenerService : NotificationListenerService() {
     val contextText = ConversationBufferStore.format(contextLines)
     val text = listOf(title, contextText).filter { it.isNotBlank() }.joinToString("\n").trim()
 
-    val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
-    val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
-    val hasDaypart = DAYPART.containsMatchIn(text)
-    val hasMapLink = MAP_LINK.containsMatchIn(text)
-    val hasHighIntent = HIGH_INTENT.containsMatchIn(text)
-    val hasTaskIntent = TASK_INTENT.containsMatchIn(text)
-    val hasEvent = EVENT.containsMatchIn(text)
-    val hasSocialPlan = SOCIAL_PLAN.containsMatchIn(text)
-    val hasAction = ACTION.containsMatchIn(text)
-    val hasChange = CHANGE.containsMatchIn(text)
     // Explicit date + time is already a useful schedule signal for apps the user selected.
     // Conversation context also catches split messages such as "晚上打羽球" then "6～8".
     val candidate = isCandidateText(text, aiEnabled)
