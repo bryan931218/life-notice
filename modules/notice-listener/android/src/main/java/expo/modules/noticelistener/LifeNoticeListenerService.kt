@@ -74,6 +74,7 @@ class LifeNoticeListenerService : NotificationListenerService() {
       // AI mode is deliberately recall-first. The service has already removed hard
       // noise and only receives packages explicitly selected by the user.
       if (aiEnabled && text.trim().length >= 3) return true
+      if (SCHEDULE.containsMatchIn(text)) return true
       val hasDate = DATE.containsMatchIn(text) || RELATIVE.containsMatchIn(text)
       val hasTime = ARABIC_TIME.containsMatchIn(text) || RELATIVE_NUMBER_TIME.containsMatchIn(text) || CHINESE_TIME.containsMatchIn(text)
       val hasDaypart = DAYPART.containsMatchIn(text)
